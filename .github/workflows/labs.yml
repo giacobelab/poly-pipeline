@@ -44,7 +44,7 @@ jobs:
       count: ${{ steps.plan.outputs.count }}
       publish: ${{ steps.publish.outputs.publish }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Plan the lab matrix
         id: plan
         env:
@@ -101,13 +101,13 @@ jobs:
 
       - name: Check out PolyCI
         if: steps.ready.outputs.ready == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: polyci
 
       - name: Check out ${{ matrix.repo }} @ ${{ matrix.ref }}
         if: steps.ready.outputs.ready == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ matrix.repo }}
           ref: ${{ matrix.ref }}
@@ -174,7 +174,7 @@ jobs:
 
       - name: Upload boot log
         if: always() && steps.ready.outputs.ready == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: boot-log-${{ matrix.lab }}
           path: out/boot.log
@@ -192,7 +192,7 @@ jobs:
 
       - name: Check out v86 BIOS files
         if: steps.ready.outputs.ready == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ steps.rel.outputs.bios_repo }}
           ref: ${{ steps.rel.outputs.bios_ref }}
@@ -219,7 +219,7 @@ jobs:
 
       - name: Upload page screenshots
         if: always() && steps.ready.outputs.ready == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: page-screenshots-${{ matrix.lab }}
           path: out/page-shots/
@@ -256,14 +256,14 @@ jobs:
 
       - name: Upload images
         if: steps.ready.outputs.ready == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.rel.outputs.tag }}
           path: dist/
 
       - name: Upload site for the Pages deploy
         if: steps.ready.outputs.ready == 'true'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: site-${{ matrix.lab }}
           path: site/
@@ -325,9 +325,9 @@ jobs:
       group: pages
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Download lab sites
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           pattern: site-*
           path: sites
