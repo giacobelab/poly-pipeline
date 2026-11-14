@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 300
     steps:
       - name: Check out PolyCI
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: polyci
 
@@ -65,7 +65,7 @@ jobs:
           PY
 
       - name: Check out buildroot-builder2
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ steps.cfg.outputs.builder_repo }}
           ref: ${{ steps.cfg.outputs.builder_ref }}
@@ -73,7 +73,7 @@ jobs:
 
       - name: Check out the lab that defines this config set
         if: steps.cfg.outputs.lab_repo != ''
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: ${{ steps.cfg.outputs.lab_repo }}
           ref: ${{ steps.cfg.outputs.lab_ref }}
@@ -128,7 +128,7 @@ jobs:
           df -h /
 
       - name: Restore Buildroot download cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: br-dl
           key: br-dl-${{ steps.cfg.outputs.buildroot_version }}-${{ steps.tag.outputs.tag }}
@@ -149,7 +149,7 @@ jobs:
 
       - name: Upload build logs on failure
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: baseline-${{ inputs.type }}-build-logs
           path: builder/artifacts/*/logs/
