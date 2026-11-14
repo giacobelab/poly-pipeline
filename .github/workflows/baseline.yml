@@ -17,17 +17,24 @@ on:
         type: choice
         options: [basic, filesystem, networking, netsec]
 
+# Read-only by default; only the publish job can write (create the release).
 permissions:
-  contents: write   # create the release
+  contents: read
 
 concurrency:
   group: baseline-${{ inputs.type }}
   cancel-in-progress: false
 
 jobs:
+  # The slow part (Buildroot, ~35 min). Ends by saving the release files as an
+  # artifact, so if publishing fails, "Re-run failed jobs" only re-runs the
+  # quick publish job below, not the build.
   baseline:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      buildroot_version: ${{ steps.cfg.outputs.buildroot_version }}
     steps:
       - name: Check out PolyCI
         uses: actions/checkout@v7
@@ -224,13 +231,41 @@ jobs:
           3. Pin: set \`baselines.$TYPE.release\` to \`$TAG\` in polyci.json.
           EOF
 
-      - name: Publish pre-release
+      - name: Save release files for the publish job
+        uses: actions/upload-artifact@v7
+        with:
+          name: baseline-release
+          path: |
+            dist/
+            notes.md
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish pre-release
+    needs: baseline
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # create the release
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@v8
+        with:
+          name: baseline-release
+          path: .
+
+      - name: Publish ${{ needs.baseline.outputs.tag }} as a pre-release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.tag.outputs.tag }}
+          TAG: ${{ needs.baseline.outputs.tag }}
           TYPE: ${{ inputs.type }}
-          BUILDROOT_VERSION: ${{ steps.cfg.outputs.buildroot_version }}
+          BUILDROOT_VERSION: ${{ needs.baseline.outputs.buildroot_version }}
         run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $TAG already exists."
+            exit 1
+          fi
           gh release create "$TAG" -R "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" --prerelease --latest=false \
             --title "Baseline $TYPE (Buildroot $BUILDROOT_VERSION, ${TAG##*-})" \

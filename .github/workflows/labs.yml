@@ -33,8 +33,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# Read-only by default; jobs that publish ask for more themselves.
 permissions:
-  contents: write   # lab releases
+  contents: read
 
 jobs:
   plan:
@@ -71,6 +72,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.count != '0'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # publish <lab>-...-release (only on the default branch)
     timeout-minutes: 60
     strategy:
       fail-fast: false
