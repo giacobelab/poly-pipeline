@@ -1,0 +1,18 @@
+# Weekly PR when the GitHub Actions used by PolyCI's workflows have updates.
+# The full lab pipeline runs on that PR before you merge it.
+# (Lab commits, baselines, v86 and the builder are pinned in polyci.json instead.)
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:23"
+      timezone: America/New_York
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+    labels: ["dependencies", "ci"]

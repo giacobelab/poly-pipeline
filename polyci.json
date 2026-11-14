@@ -1,0 +1,89 @@
+{
+  "_comment": "Everything PolyCI builds, pinned. Change a ref or a baseline release here, in a pull request; CI does the rest. See README.md.",
+
+  "builder": {
+    "repo": "giacobe/buildroot-builder2",
+    "ref": "b6fb25fcadbd536a64ca7116f1c12e6daa7b5fd8",
+    "buildroot_version": "2025.02.15"
+  },
+
+  "v86": {
+    "npm_version": "0.5.473",
+    "bios_repo": "copy/v86",
+    "bios_ref": "315b2b0b758703ef0e6cc7b4088d6068f83f3c20"
+  },
+
+  "baselines": {
+    "basic": {
+      "description": "Basic shell commands (builder config set 'basic')",
+      "config_set": "basic",
+      "release": ""
+    },
+    "filesystem": {
+      "description": "Files, text tools and compression (builder config set 'basic-compression')",
+      "config_set": "basic-compression",
+      "release": ""
+    },
+    "networking": {
+      "description": "Network namespaces, veth, netem, dnsmasq, traceroute, curl, sudo (from polylinux-networking)",
+      "config_set": "networking-prototype-v1",
+      "from_lab": {
+        "repo": "giacobe/polylinux-networking",
+        "ref": "4262596e92f53e3c9ffec07415ebe45a7e5dd9b0",
+        "install_script": "install-builder-config.sh"
+      },
+      "release": ""
+    },
+    "netsec": {
+      "description": "Network security (not defined yet)",
+      "config_set": "",
+      "enabled": false,
+      "release": ""
+    }
+  },
+
+  "labs": {
+    "polybandit3.1": {
+      "title": "PolyBandit 3.1",
+      "repo": "giacobe/polybandit3.1",
+      "ref": "0c95f01555f8b9e7da26c97f70d6d606d4b832ff",
+      "subdir": ".",
+      "baseline": "filesystem",
+      "self_test": "test.sh",
+      "boot_test": "v31",
+      "users": "bandit{n}",
+      "levels": 13
+    },
+    "polybandit3.0": {
+      "title": "PolyBandit 3.0",
+      "repo": "ruffm/polybandit3",
+      "ref": "65d39b9c4af342445a577f523aacb463b483dfa5",
+      "subdir": "polybandit3.0",
+      "rename": { "installbandit.sh": "install.sh" },
+      "baseline": "filesystem",
+      "boot_test": "v3",
+      "users": "bandit{n}",
+      "levels": 13
+    },
+    "polylinux-basic": {
+      "title": "PolyLinux Basic",
+      "repo": "giacobe/polylinux-basic",
+      "ref": "e08e56b2a73386043fafc8bd0c59f811b6f0262c",
+      "subdir": ".",
+      "baseline": "basic",
+      "boot_test": "generic",
+      "users": "level{n}",
+      "levels": 10
+    },
+    "polylinux-networking": {
+      "title": "PolyLinux Networking",
+      "repo": "giacobe/polylinux-networking",
+      "ref": "4262596e92f53e3c9ffec07415ebe45a7e5dd9b0",
+      "subdir": "payload",
+      "baseline": "networking",
+      "boot_test": "generic",
+      "users": "level{n}",
+      "levels": 10
+    }
+  }
+}

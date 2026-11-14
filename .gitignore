@@ -1,0 +1,27 @@
+# Local build and test output: CI publishes images as releases; never commit them.
+out/
+dist/
+site/
+base/
+lab/
+public/
+sites/
+*.cpio
+*.cpio.gz
+*bzImage
+*.log
+node_modules/
+__pycache__/
+*.py[cod]
+.venv/
+
+# OS and editor files
+.DS_Store
+._*
+Thumbs.db
+[Dd]esktop.ini
+.idea/
+*.iml
+.vscode/
+*.swp
+*~

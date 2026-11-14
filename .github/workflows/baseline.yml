@@ -1,0 +1,244 @@
+name: Publish baseline
+
+# Builds one baseline type from polyci.json (kernel + base rootfs, no lab) and
+# publishes it as a PRE-RELEASE tagged baseline-<type>-<hash>, where <hash>
+# covers the Buildroot version, the full config set and the builder's build
+# script. Same inputs, same tag; any change, new tag.
+#
+# Then: test it (Build labs -> Run workflow, baseline_override TYPE=TAG),
+# promote it (gh release edit TAG --prerelease=false --latest=false), and pin
+# it in polyci.json (baselines.TYPE.release) in a pull request.
+
+on:
+  workflow_dispatch:
+    inputs:
+      type:
+        description: Baseline type (from polyci.json)
+        type: choice
+        options: [basic, filesystem, networking, netsec]
+
+permissions:
+  contents: write   # create the release
+
+concurrency:
+  group: baseline-${{ inputs.type }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    steps:
+      - name: Check out PolyCI
+        uses: actions/checkout@v6
+        with:
+          path: polyci
+
+      - name: Read polyci.json
+        id: cfg
+        env:
+          TYPE: ${{ inputs.type }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          cfg = json.load(open("polyci/polyci.json"))
+          t = os.environ["TYPE"]
+          b = cfg["baselines"].get(t)
+          if b is None:
+              sys.exit(f"::error::baseline type {t!r} is not in polyci.json")
+          if b.get("enabled", True) is False or not b.get("config_set"):
+              sys.exit(f"::error::baseline type {t!r} is disabled or has no config_set in polyci.json")
+          lab = b.get("from_lab") or {}
+          out = {
+              "config_set": b["config_set"],
+              "builder_repo": cfg["builder"]["repo"],
+              "builder_ref": cfg["builder"]["ref"],
+              "buildroot_version": cfg["builder"]["buildroot_version"],
+              "lab_repo": lab.get("repo", ""),
+              "lab_ref": lab.get("ref", ""),
+              "lab_install": lab.get("install_script", ""),
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              for k, v in out.items():
+                  fh.write(f"{k}={v}\n")
+          print(json.dumps(out, indent=2))
+          PY
+
+      - name: Check out buildroot-builder2
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.cfg.outputs.builder_repo }}
+          ref: ${{ steps.cfg.outputs.builder_ref }}
+          path: builder
+
+      - name: Check out the lab that defines this config set
+        if: steps.cfg.outputs.lab_repo != ''
+        uses: actions/checkout@v6
+        with:
+          repository: ${{ steps.cfg.outputs.lab_repo }}
+          ref: ${{ steps.cfg.outputs.lab_ref }}
+          path: lab
+
+      - name: Install the lab's config set into the builder
+        if: steps.cfg.outputs.lab_repo != ''
+        env:
+          INSTALL: ${{ steps.cfg.outputs.lab_install }}
+        run: sh "lab/$INSTALL" "$GITHUB_WORKSPACE/builder"
+
+      - name: Drop Buildroot's host QEMU (not part of the image)
+        env:
+          CONFIG_SET: ${{ steps.cfg.outputs.config_set }}
+        run: |
+          dir=builder/config-sets/"$CONFIG_SET"
+          [ -d "$dir" ] || { echo "::error::config set $CONFIG_SET not found in the builder"; exit 1; }
+          for f in "$dir"/defconfig "$dir"/*.fragment; do
+            [ -f "$f" ] && sed -i '/^BR2_PACKAGE_HOST_QEMU/d' "$f"
+          done
+          ! grep -h '^BR2_PACKAGE_HOST_QEMU' "$dir"/*
+
+      - name: Work out the release tag
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TYPE: ${{ inputs.type }}
+          CONFIG_SET: ${{ steps.cfg.outputs.config_set }}
+          BUILDROOT_VERSION: ${{ steps.cfg.outputs.buildroot_version }}
+        run: |
+          # Hash = Buildroot version + every config-set file (README.md aside)
+          # + the builder's build script. Fragments are inside the config set.
+          h=$( { echo "buildroot $BUILDROOT_VERSION"
+                 for f in $(cd builder/config-sets/"$CONFIG_SET" && ls | sort); do
+                   [ "$f" = README.md ] && continue
+                   echo "== $f"; cat builder/config-sets/"$CONFIG_SET"/"$f"
+                 done
+                 echo "== 02-build-baseline.sh"; cat builder/scripts/02-build-baseline.sh
+               } | sha256sum | cut -c1-10)
+          tag="baseline-${TYPE}-${h}"
+          echo "hash=$h" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          if gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $tag already exists: this exact baseline was already built. Delete it first if you really mean to rebuild it."
+            exit 1
+          fi
+          echo "Will publish $tag"
+
+      - name: Free disk space for Buildroot
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Restore Buildroot download cache
+        uses: actions/cache@v5
+        with:
+          path: br-dl
+          key: br-dl-${{ steps.cfg.outputs.buildroot_version }}-${{ steps.tag.outputs.tag }}
+          restore-keys: br-dl-${{ steps.cfg.outputs.buildroot_version }}-
+
+      - name: Build baseline (kernel + rootfs)
+        env:
+          BR2_DL_DIR: ${{ github.workspace }}/br-dl
+          BUILDROOT_VERSION: ${{ steps.cfg.outputs.buildroot_version }}
+          CONFIG_SET: ${{ steps.cfg.outputs.config_set }}
+        run: |
+          unset LD_LIBRARY_PATH PERL_MM_OPT
+          bash builder/scripts/01-setup-buildroot.sh
+          bash builder/scripts/02-build-baseline.sh --config "$CONFIG_SET"
+          dir=$(ls -d builder/artifacts/"$CONFIG_SET"-* | sort | tail -n1)
+          mkdir -p baseline
+          cp -a "$dir"/. baseline/
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: baseline-${{ inputs.type }}-build-logs
+          path: builder/artifacts/*/logs/
+          if-no-files-found: ignore
+
+      - name: Smoke test (bare base boots to a login prompt)
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends qemu-system-x86 python3-pexpect
+          python3 - <<'PY'
+          import pexpect, sys
+          vm = pexpect.spawn("qemu-system-i386 -m 256M -nographic -no-reboot "
+                             "-kernel baseline/images/bzImage -initrd baseline/images/rootfs.cpio.gz "
+                             "-append 'console=ttyS0 panic=-1'", encoding="utf-8",
+                             codec_errors="replace", timeout=300)
+          vm.logfile_read = open("baseline-smoke.log", "w")
+          if vm.expect([r"login: ?", r"Kernel panic[^\r\n]*", pexpect.EOF]) != 0:
+              print(f"::error::bare baseline did not reach a login prompt: {vm.after}")
+              sys.exit(1)
+          print("bare baseline boots to a login prompt")
+          vm.terminate(force=True)
+          PY
+
+      - name: Assemble release files
+        env:
+          TYPE: ${{ inputs.type }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          HASH: ${{ steps.tag.outputs.hash }}
+          CONFIG_SET: ${{ steps.cfg.outputs.config_set }}
+          BUILDROOT_VERSION: ${{ steps.cfg.outputs.buildroot_version }}
+          BUILDER_REPO: ${{ steps.cfg.outputs.builder_repo }}
+          BUILDER_REF: ${{ steps.cfg.outputs.builder_ref }}
+          LAB_REPO: ${{ steps.cfg.outputs.lab_repo }}
+          LAB_REF: ${{ steps.cfg.outputs.lab_ref }}
+        run: |
+          mkdir -p dist
+          cp baseline/images/bzImage baseline/images/rootfs.cpio.gz dist/
+          tar -czf dist/baseline-manifest.tar.gz -C baseline configs manifest logs
+          python3 - <<'PY'
+          import hashlib, json, os, datetime
+          e = os.environ
+          sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+          info = {
+              "tag": e["TAG"], "type": e["TYPE"], "hash": e["HASH"],
+              "config_set": e["CONFIG_SET"], "buildroot_version": e["BUILDROOT_VERSION"],
+              "builder": {"repo": e["BUILDER_REPO"], "commit": e["BUILDER_REF"]},
+              "config_from_lab": {"repo": e["LAB_REPO"], "commit": e["LAB_REF"]} if e["LAB_REPO"] else None,
+              "host_qemu_removed": True,
+              "kernel_sha256": sha("dist/bzImage"),
+              "rootfs_sha256": sha("dist/rootfs.cpio.gz"),
+              "built_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+              "built_by": f'{e["GITHUB_SERVER_URL"]}/{e["GITHUB_REPOSITORY"]}/actions/runs/{e["GITHUB_RUN_ID"]}',
+          }
+          json.dump(info, open("dist/baseline.json", "w"), indent=2)
+          PY
+          (cd dist && sha256sum bzImage rootfs.cpio.gz baseline-manifest.tar.gz baseline.json > SHA256SUMS)
+          cat dist/baseline.json
+          cat > notes.md <<EOF
+          Baseline **$TYPE**: kernel + base rootfs, no lab payload.
+
+          | | |
+          |---|---|
+          | Config set | \`$CONFIG_SET\` |
+          | Buildroot | $BUILDROOT_VERSION |
+          | Builder | $BUILDER_REPO @ \`${BUILDER_REF:0:12}\` |
+          | Config from | ${LAB_REPO:-builder} ${LAB_REF:+@ \`${LAB_REF:0:12}\`} |
+
+          **Status:** pre-release until tested.
+          1. Test: Actions → Build labs → Run workflow, \`baseline_override: $TYPE=$TAG\`.
+          2. Promote: \`gh release edit $TAG --prerelease=false --latest=false\`.
+          3. Pin: set \`baselines.$TYPE.release\` to \`$TAG\` in polyci.json.
+          EOF
+
+      - name: Publish pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          TYPE: ${{ inputs.type }}
+          BUILDROOT_VERSION: ${{ steps.cfg.outputs.buildroot_version }}
+        run: |
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "Baseline $TYPE (Buildroot $BUILDROOT_VERSION, ${TAG##*-})" \
+            --notes-file notes.md \
+            dist/bzImage dist/rootfs.cpio.gz dist/baseline-manifest.tar.gz dist/baseline.json dist/SHA256SUMS
+          {
+            echo "### Published pre-release \`$TAG\`"
+            echo "1. Test: **Build labs** → Run workflow with \`baseline_override\` = \`$TYPE=$TAG\`."
+            echo "2. Promote: \`gh release edit $TAG --prerelease=false --latest=false\`"
+            echo "3. Pin it: \`baselines.$TYPE.release = \"$TAG\"\` in polyci.json."
+          } >> "$GITHUB_STEP_SUMMARY"
