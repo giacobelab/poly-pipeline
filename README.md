@@ -142,11 +142,19 @@ The page test uses the runner's Chrome with a cached `puppeteer-core`.
 **First baseline of a type**
 1. Actions → **Publish baseline** → Run workflow → pick the type. About an
    hour; publishes a pre-release.
-2. Actions → **Build labs** → Run workflow with `baseline_override` =
-   `TYPE=TAG`. All labs of that type must pass. Nothing is published.
-3. Promote: `gh release edit TAG --prerelease=false --latest=false`.
-4. Pin it: set `baselines.TYPE.release` to `TAG` in `polyci.json` in a PR.
-   Merging releases every lab of that type and updates Pages.
+2. Actions → **Build labs** → Run workflow with `baseline_override` = the
+   tag (e.g. `baseline-networking-fc3d6448a7`; `TYPE=TAG` also works, and
+   several can be comma-separated) and tick **promote**. Leave `labs` blank or
+   name labs that use that baseline. Nothing is published from this run.
+3. If every lab passes, the **Promote and pin tested baselines** job marks the
+   baseline as a full release and opens a PR (`polyci/pin-baselines`) setting
+   `baselines.TYPE.release` in `polyci.json`. Merge it: that releases every lab
+   of that type and updates Pages. (With only the built-in token, close and
+   reopen the PR to start its checks, or add `POLYCI_BOT_TOKEN`.)
+
+   Without **promote**, do it by hand:
+   `gh release edit TAG --prerelease=false --latest=false`, then set
+   `baselines.TYPE.release` in a PR.
 
 **A lab changed upstream:** every Monday, **Propose lab updates** opens (or
 refreshes) one PR moving each changed lab's `ref` to its newest commit, with

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn polyci.json into the lab build matrix.
 
-  plan.py [--labs a,b] [--baseline-override TYPE=TAG] [--check-releases REPO]
+  plan.py [--labs a,b] [--baseline-override TYPE=TAG,...] [--check-releases REPO]
           [--github-output FILE]
 
 Each matrix entry carries everything one lab's job needs, plus a mode:
@@ -63,7 +63,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--labs", default="", help="comma-separated lab ids (default: all)")
     ap.add_argument("--baseline-override", default="",
-                    help="TYPE=TAG: use this baseline release for TYPE (e.g. to test a pre-release)")
+                    help="TYPE=TAG or just TAG, comma-separated: use these baseline releases "
+                         "(e.g. to test a pre-release)")
     ap.add_argument("--check-releases", default="", metavar="OWNER/REPO",
                     help="reuse lab releases in this repo when their fingerprint matches")
     ap.add_argument("--github-output")
@@ -73,10 +74,19 @@ def main():
     baselines, labs = cfg["baselines"], cfg["labs"]
 
     override = {}
-    if a.baseline_override.strip():
-        btype, _, tag = a.baseline_override.strip().partition("=")
+    for item in (x.strip() for x in a.baseline_override.split(",")):
+        if not item:
+            continue
+        btype, eq, tag = item.partition("=")
+        if not eq:  # a bare tag: the type is in its name
+            tag = item
+            btype = max((n for n in baselines if tag.startswith(f"baseline-{n}-")), key=len, default="")
+        btype, tag = btype.strip(), tag.strip()
         if btype not in baselines or not TAG.match(tag) or not tag.startswith(f"baseline-{btype}-"):
-            die(f"bad --baseline-override {a.baseline_override!r} (want TYPE=baseline-TYPE-<hash>)")
+            die(f"bad --baseline-override {item!r} (want baseline-TYPE-<hash> or TYPE=baseline-TYPE-<hash>; "
+                f"types: {list(baselines)})")
+        if btype in override and override[btype] != tag:
+            die(f"two overrides for baseline {btype!r}")
         override[btype] = tag
 
     for name, b in baselines.items():
@@ -144,12 +154,18 @@ def main():
             "levels": str(lab.get("levels", "")),
         })
 
+    tested = {m["baseline_type"] for m in matrix if m["mode"] == "build"}
+    untested = sorted(set(override) - tested)
+    if untested:
+        die(f"no lab in this run uses the overridden baseline(s) {untested}; "
+            f"add a lab that does to 'labs' (or leave 'labs' blank)")
+
     for m in matrix:
         print(f"{m['lab']:<24} {m['mode']:<6} {m['why']}")
     out = json.dumps({"include": matrix})
     if a.github_output:
         with open(a.github_output, "a") as fh:
-            fh.write(f"matrix={out}\ncount={len(matrix)}\n"
+            fh.write(f"matrix={out}\ncount={len(matrix)}\noverrides={json.dumps(override, sort_keys=True)}\n"
                      f"any_build={'true' if any(m['mode'] == 'build' for m in matrix) else 'false'}\n")
 
 
