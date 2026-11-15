@@ -30,7 +30,7 @@
         "ref": "4262596e92f53e3c9ffec07415ebe45a7e5dd9b0",
         "install_script": "install-builder-config.sh"
       },
-      "release": ""
+      "release": "baseline-networking-fc3d6448a7"
     },
     "netsec": {
       "description": "Network security (not defined yet)",
