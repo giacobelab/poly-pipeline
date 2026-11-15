@@ -26,7 +26,7 @@ covers the Buildroot version, the whole config set and the builder's build
 script. Rebuilding with the same inputs gives the same tag; changing anything
 gives a new one.
 
-**Labs** are Nick's repos (or yours), each pinned to a commit in
+**Labs** are pinned to a commit in
 `polyci.json`. PolyCI turns the lab's payload folder into `lab.cpio.gz`:
 files from the commit itself, under `/root`, with the same modes and
 line-ending handling as buildroot-builder2's `03-package-payload.sh`, and
