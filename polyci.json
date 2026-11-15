@@ -15,7 +15,7 @@
       "description": "Basic shell commands (builder config set 'basic')",
       "config_set": "basic",
       "extra_config": ["BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y"],
-      "release": ""
+      "release": "baseline-basic-c6c454a5fc"
     },
     "filesystem": {
       "description": "Files, text tools and compression (builder config set 'basic-compression')",
