@@ -63,6 +63,7 @@ A new release appears only when a lab commit or its baseline changes.
   "builder":   { "repo": "giacobe/buildroot-builder2", "ref": "<sha>", "buildroot_version": "2025.02.15" },
   "v86":       { "npm_version": "0.5.473", "bios_repo": "copy/v86", "bios_ref": "<sha>" },
   "baselines": {
+    "basic":      { "config_set": "basic", "extra_config": ["BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y"], "release": "" },
     "filesystem": { "config_set": "basic-compression", "release": "baseline-filesystem-<hash>" },
     "networking": { "config_set": "networking-prototype-v1",
                     "from_lab": { "repo": "giacobe/polylinux-networking", "ref": "<sha>",
@@ -81,6 +82,15 @@ A new release appears only when a lab commit or its baseline changes.
 - `baselines.<type>.config_set` is a builder config set, or one a lab repo
   provides (`from_lab`: PolyCI runs that repo's install script into the
   builder, as Nick's instructions say).
+- `baselines.<type>.extra_config`: extra `BR2_...` lines added to the end of
+  the config set's `features.fragment` before the build (and so into the tag
+  hash). The basic set needs `BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y`; without it
+  Buildroot quietly drops bash, coreutils, findutils, gawk, grep and sed. Drop
+  the entry once the builder's config set has the fix.
+- Every baseline build runs `scripts/check-baseline.py` before publishing: each
+  `BR2_...=y` the config set asks for must still be set after Buildroot's
+  `olddefconfig`, and each command in `required-commands.txt` must be in the
+  rootfs.
 - `baselines.<type>.release` pins the promoted baseline release labs use.
   Blank: labs of that type are skipped (reported, not failed).
 - `labs.<id>.subdir` is the folder that becomes `/root`; `rename` renames files
