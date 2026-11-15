@@ -1,4 +1,6 @@
 name: Publish baseline
+# Each run is listed as "Publish baseline-<type>", e.g. Publish baseline-networking.
+run-name: Publish baseline-${{ inputs.type }}
 
 # Builds one baseline type from polyci.json (kernel + base rootfs, no lab) and
 # publishes it as a PRE-RELEASE tagged baseline-<type>-<hash>, where <hash>
@@ -30,6 +32,7 @@ jobs:
   # artifact, so if publishing fails, "Re-run failed jobs" only re-runs the
   # quick publish job below, not the build.
   baseline:
+    name: Build baseline-${{ inputs.type }}
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     outputs:
@@ -56,6 +59,12 @@ jobs:
           if b.get("enabled", True) is False or not b.get("config_set"):
               sys.exit(f"::error::baseline type {t!r} is disabled or has no config_set in polyci.json")
           lab = b.get("from_lab") or {}
+          extra = b.get("extra_config") or []
+          bad = [x for x in extra if not x.startswith("BR2_") or "=" not in x or "\n" in x]
+          if bad:
+              sys.exit(f"::error::extra_config entries must look like BR2_FOO=y: {bad}")
+          with open("polyci-extra.config", "w") as fh:
+              fh.writelines(x + "\n" for x in extra)
           out = {
               "config_set": b["config_set"],
               "builder_repo": cfg["builder"]["repo"],
@@ -92,7 +101,7 @@ jobs:
           INSTALL: ${{ steps.cfg.outputs.lab_install }}
         run: sh "lab/$INSTALL" "$GITHUB_WORKSPACE/builder"
 
-      - name: Drop Buildroot's host QEMU (not part of the image)
+      - name: Adjust the config set (drop host QEMU, add extra_config)
         env:
           CONFIG_SET: ${{ steps.cfg.outputs.config_set }}
         run: |
@@ -102,6 +111,15 @@ jobs:
             [ -f "$f" ] && sed -i '/^BR2_PACKAGE_HOST_QEMU/d' "$f"
           done
           ! grep -h '^BR2_PACKAGE_HOST_QEMU' "$dir"/*
+          # extra_config from polyci.json goes at the end of features.fragment,
+          # which 02-build-baseline.sh appends after the defconfig (last value
+          # wins). It is part of the config set, so it changes the tag hash.
+          if [ -s polyci-extra.config ]; then
+            f="$dir/features.fragment"
+            [ ! -s "$f" ] || [ -z "$(tail -c1 "$f")" ] || echo >> "$f"
+            { echo "# Added by PolyCI (polyci.json extra_config)"; cat polyci-extra.config; } >> "$f"
+            echo "Appended to $f:"; cat polyci-extra.config
+          fi
 
       - name: Work out the release tag
         id: tag
@@ -154,6 +172,19 @@ jobs:
           mkdir -p baseline
           cp -a "$dir"/. baseline/
 
+      - name: Check the build kept every requested package
+        env:
+          CONFIG_SET: ${{ steps.cfg.outputs.config_set }}
+        run: |
+          # Buildroot silently drops options whose dependencies are not met
+          # (e.g. bash needs BR2_PACKAGE_BUSYBOX_SHOW_OTHERS). Stop here rather
+          # than publish a baseline that labs will fail on.
+          python3 polyci/scripts/check-baseline.py \
+            --config-set builder/config-sets/"$CONFIG_SET" \
+            --final-config baseline/configs/final-buildroot.config \
+            --rootfs baseline/images/rootfs.cpio.gz \
+            --required builder/config-sets/"$CONFIG_SET"/required-commands.txt
+
       - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v7
@@ -205,6 +236,7 @@ jobs:
               "config_set": e["CONFIG_SET"], "buildroot_version": e["BUILDROOT_VERSION"],
               "builder": {"repo": e["BUILDER_REPO"], "commit": e["BUILDER_REF"]},
               "config_from_lab": {"repo": e["LAB_REPO"], "commit": e["LAB_REF"]} if e["LAB_REPO"] else None,
+              "extra_config": [l for l in open("polyci-extra.config").read().splitlines() if l],
               "host_qemu_removed": True,
               "kernel_sha256": sha("dist/bzImage"),
               "rootfs_sha256": sha("dist/rootfs.cpio.gz"),
@@ -234,7 +266,7 @@ jobs:
       - name: Save release files for the publish job
         uses: actions/upload-artifact@v7
         with:
-          name: baseline-release
+          name: baseline-${{ inputs.type }}-release
           path: |
             dist/
             notes.md
@@ -242,7 +274,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Publish pre-release
+    name: Publish baseline-${{ inputs.type }} pre-release
     needs: baseline
     runs-on: ubuntu-24.04
     permissions:
@@ -251,7 +283,7 @@ jobs:
       - name: Download release files
         uses: actions/download-artifact@v8
         with:
-          name: baseline-release
+          name: baseline-${{ inputs.type }}-release
           path: .
 
       - name: Publish ${{ needs.baseline.outputs.tag }} as a pre-release

@@ -1,4 +1,12 @@
 name: Build labs
+# Manual runs say what they test, e.g. "Build labs: test networking=baseline-networking-fc3d6448a7".
+# Push and PR runs keep GitHub's usual name (commit message or PR title): an
+# empty run-name falls back to it.
+run-name: >-
+  ${{ github.event_name != 'workflow_dispatch' && ' ' ||
+      inputs.baseline_override != '' && format('Build labs: test {0}', inputs.baseline_override) ||
+      inputs.labs != '' && format('Build labs: {0}', inputs.labs) ||
+      inputs.force && 'Build labs: full rebuild' || 'Build labs' }}
 
 # For every lab in polyci.json, scripts/plan.py picks a mode:
 #   build  1. check out the lab repo at its pinned commit
