@@ -1,13 +1,18 @@
 name: Build labs
 
-# For every lab in polyci.json:
-#   1. check out the lab repo at its pinned commit
-#   2. download its baseline release (baseline-<type>-<hash>) and verify it
-#   3. build lab.cpio.gz from the lab's folder (make-overlay.py, reproducible)
-#   4. join: packaged.rootfs.cpio.gz = baseline rootfs.cpio.gz + lab.cpio.gz
-#   5. test: image check, QEMU boot test, headless-Chrome play of the v86 page
-#   6. on the default branch, publish <lab>-<commit>-<baselinehash>-release
+# For every lab in polyci.json, scripts/plan.py picks a mode:
+#   build  1. check out the lab repo at its pinned commit
+#          2. download its baseline release (baseline-<type>-<hash>) and verify it
+#          3. build lab.cpio.gz from the lab's folder (make-overlay.py, reproducible)
+#          4. join: packaged.rootfs.cpio.gz = baseline rootfs.cpio.gz + lab.cpio.gz
+#          5. test: image check, then the QEMU boot test and the headless-Chrome
+#             play of the v86 page, in parallel
+#          6. on the default branch, publish <lab>-<commit>-<baselinehash>-release
+#   reuse  that release already exists and was made by this same pipeline:
+#          download it and rebuild the web page only (seconds)
+#   skip   no baseline pinned for the lab's type yet
 # then deploy every lab's page to GitHub Pages under one landing page.
+# The weekly run (and a run with "force") always does full builds.
 
 on:
   push:
@@ -15,7 +20,7 @@ on:
     paths-ignore: ['**.md']
   pull_request:
   schedule:
-    - cron: '41 7 * * 1'   # weekly, catches runner or dependency drift
+    - cron: '41 7 * * 1'   # weekly full rebuild: catches runner or dependency drift
   workflow_dispatch:
     inputs:
       labs:
@@ -24,6 +29,10 @@ on:
       baseline_override:
         description: Test a baseline before pinning it, as TYPE=TAG (e.g. filesystem=baseline-filesystem-0123abcd45)
         default: ''
+      force:
+        description: Rebuild and retest every lab, even ones already released by this pipeline
+        type: boolean
+        default: false
       publish:
         description: Publish releases and Pages from this run (default branch only; never with an override)
         type: boolean
@@ -43,15 +52,23 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
+      any_build: ${{ steps.plan.outputs.any_build }}
       publish: ${{ steps.publish.outputs.publish }}
     steps:
       - uses: actions/checkout@v7
       - name: Plan the lab matrix
         id: plan
         env:
+          GH_TOKEN: ${{ github.token }}
           LABS: ${{ inputs.labs }}
           OVERRIDE: ${{ inputs.baseline_override }}
-        run: python3 scripts/plan.py --labs "$LABS" --baseline-override "$OVERRIDE" --github-output "$GITHUB_OUTPUT"
+          FULL: ${{ github.event_name == 'schedule' || inputs.force == true }}
+        run: |
+          check=()
+          [ "$FULL" = true ] || check=(--check-releases "$GITHUB_REPOSITORY")
+          python3 scripts/plan.py --labs "$LABS" --baseline-override "$OVERRIDE" \
+            "${check[@]}" --github-output "$GITHUB_OUTPUT" | tee plan.txt
+          { echo '### Plan'; echo '```'; cat plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - name: Decide whether to publish
         id: publish
         env:
@@ -67,14 +84,46 @@ jobs:
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           echo "Publish releases and Pages from this run: $publish"
 
-  lab:
-    name: lab (${{ matrix.lab }})
+  # The QEMU boot-test tools, built once into an image and reused by every lab
+  # job. Rebuilt only when tools/Dockerfile changes (the tag is its hash).
+  tools:
     needs: plan
-    if: needs.plan.outputs.count != '0'
+    if: needs.plan.outputs.any_build == 'true'
     runs-on: ubuntu-24.04
     permissions:
-      contents: write   # publish <lab>-...-release (only on the default branch)
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: tools
+      - name: Build and push the tools image if it doesn't exist yet
+        id: image
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/polyci-qemu:$(sha256sum tools/Dockerfile | cut -c1-12)"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if docker manifest inspect "$image" >/dev/null 2>&1; then
+            echo "$image already exists"
+          else
+            docker build --build-arg "SOURCE_REPO=https://github.com/$GITHUB_REPOSITORY" -t "$image" tools
+            docker push "$image"
+          fi
+
+  lab:
+    name: lab (${{ matrix.lab }})
+    needs: [plan, tools]
+    # Run even when the tools job was skipped (every lab reused or skipped).
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0' && needs.tools.result != 'failure' && needs.tools.result != 'cancelled'
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: write   # publish <lab>-...-release (only on the default branch)
+      packages: read    # pull the tools image
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -87,37 +136,60 @@ jobs:
       BASELINE_TYPE: ${{ matrix.baseline_type }}
       BASELINE_TAG: ${{ matrix.baseline_tag }}
       BASELINE_IS_OVERRIDE: ${{ matrix.baseline_is_override }}
-      USERS: ${{ matrix.users }}
-      LEVELS: ${{ matrix.levels }}
+      RELEASE_TAG: ${{ matrix.release_tag }}
+      FINGERPRINT: ${{ matrix.fingerprint }}
+      MODE: ${{ matrix.mode }}
+      TOOLS_IMAGE: ${{ needs.tools.outputs.image }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - name: Baseline available?
-        id: ready
+      - name: "Mode: ${{ matrix.mode }}"
+        env:
+          WHY: ${{ matrix.why }}
         run: |
-          if [ -z "$BASELINE_TAG" ]; then
-            echo "::notice::$LAB skipped: no '$BASELINE_TYPE' baseline release is pinned in polyci.json yet."
-            echo "**$LAB** skipped: no \`$BASELINE_TYPE\` baseline pinned yet (run **Publish baseline**, then pin it)." >> "$GITHUB_STEP_SUMMARY"
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          fi
+          echo "$LAB: $MODE ($WHY)"
+          echo "**$LAB**: $MODE ($WHY)" >> "$GITHUB_STEP_SUMMARY"
+          [ "$MODE" != skip ] || echo "::notice::$LAB skipped: $WHY. Run Publish baseline, then pin it in polyci.json."
+
+      - name: Start pulling the tools image
+        if: matrix.mode == 'build'
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          # In the background, so it overlaps with the steps below.
+          ( docker pull -q "$TOOLS_IMAGE" > "$RUNNER_TEMP/pull.log" 2>&1; echo $? > "$RUNNER_TEMP/pull.rc" ) &
 
       - name: Check out PolyCI
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode != 'skip'
         uses: actions/checkout@v7
         with:
           path: polyci
 
       - name: Check out ${{ matrix.repo }} @ ${{ matrix.ref }}
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode != 'skip'
         uses: actions/checkout@v7
         with:
           repository: ${{ matrix.repo }}
           ref: ${{ matrix.ref }}
           path: lab
 
+      - name: Level settings (from the lab's lab.json)
+        if: matrix.mode != 'skip'
+        id: settings
+        env:
+          USERS: ${{ matrix.users }}
+          LEVELS: ${{ matrix.levels }}
+        run: python3 polyci/scripts/lab-settings.py lab --users "$USERS" --levels "$LEVELS" --github-output "$GITHUB_OUTPUT"
+
+      # ---- reuse: the released images are already tested ----
+      - name: Download released images (${{ matrix.release_tag }})
+        if: matrix.mode == 'reuse'
+        run: |
+          gh release download "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" -D out \
+            -p packaged.bzImage -p packaged.rootfs.cpio.gz -p release.json -p SHA256SUMS
+          (cd out && sha256sum -c --ignore-missing SHA256SUMS)
+
+      # ---- build ----
       - name: Download baseline ${{ matrix.baseline_tag }}
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode == 'build'
         run: |
           pre=$(gh release view "$BASELINE_TAG" -R "$GITHUB_REPOSITORY" --json isPrerelease --jq .isPrerelease) \
             || { echo "::error::Baseline release $BASELINE_TAG not found"; exit 1; }
@@ -132,12 +204,12 @@ jobs:
           echo "Baseline $BASELINE_TAG (pre-release: $pre)"
 
       - name: Lab self-test (${{ matrix.self_test }})
-        if: steps.ready.outputs.ready == 'true' && matrix.self_test != ''
+        if: matrix.mode == 'build' && matrix.self_test != ''
         working-directory: lab
         run: sh "${{ matrix.self_test }}"
 
       - name: Build lab.cpio.gz and join it onto the baseline
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode == 'build'
         run: |
           mkdir -p out
           # shellcheck disable=SC2086  # RENAMES is a list of --rename args
@@ -148,90 +220,103 @@ jobs:
           ls -l out
 
       - name: Verify the joined image
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode == 'build'
         run: |
           python3 polyci/scripts/verify-image.py \
             --packaged out/packaged.rootfs.cpio.gz --base base/rootfs.cpio.gz \
             --lab out/lab.cpio.gz --manifest out/lab-manifest.txt \
             --required base/manifest/required-commands.txt
 
-      - name: Install QEMU and enable KVM
-        if: steps.ready.outputs.ready == 'true'
-        id: kvm
+      # ---- the web page (both build and reuse) ----
+      - name: v86 settings
+        if: matrix.mode != 'skip'
+        id: v86
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qemu-system-x86 python3-pexpect
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
-            | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
-          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm || true
-          if [ -w /dev/kvm ]; then echo "flag=--kvm" >> "$GITHUB_OUTPUT"; else echo "flag=" >> "$GITHUB_OUTPUT"; fi
-
-      - name: Boot test (${{ matrix.boot_test }})
-        if: steps.ready.outputs.ready == 'true'
-        timeout-minutes: 30
-        run: |
-          python3 polyci/scripts/boot-test.py --flavor "${{ matrix.boot_test }}" \
-            --users "$USERS" --levels "$LEVELS" \
-            --kernel out/packaged.bzImage --initrd out/packaged.rootfs.cpio.gz \
-            --log out/boot.log ${{ steps.kvm.outputs.flag }}
-
-      - name: Upload boot log
-        if: always() && steps.ready.outputs.ready == 'true'
-        uses: actions/upload-artifact@v7
-        with:
-          name: boot-log-${{ matrix.lab }}
-          path: out/boot.log
-          if-no-files-found: ignore
-
-      - name: Release tag and v86 settings
-        if: steps.ready.outputs.ready == 'true'
-        id: rel
-        run: |
-          tag="${LAB}-${REF:0:7}-${BASELINE_TAG##*-}-release"
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          jq -r '"v86_version=\(.v86.npm_version)\nbios_repo=\(.v86.bios_repo)\nbios_ref=\(.v86.bios_ref)"' \
+          jq -r '"version=\(.v86.npm_version)\nbios_repo=\(.v86.bios_repo)\nbios_ref=\(.v86.bios_ref)"' \
             polyci/polyci.json >> "$GITHUB_OUTPUT"
-          echo "Release tag: $tag"
 
       - name: Check out v86 BIOS files
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode != 'skip'
         uses: actions/checkout@v7
         with:
-          repository: ${{ steps.rel.outputs.bios_repo }}
-          ref: ${{ steps.rel.outputs.bios_ref }}
+          repository: ${{ steps.v86.outputs.bios_repo }}
+          ref: ${{ steps.v86.outputs.bios_ref }}
           path: v86src
           sparse-checkout: bios
           sparse-checkout-cone-mode: false
 
       - name: Assemble the v86 page
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode != 'skip'
         env:
-          V86_VERSION: ${{ steps.rel.outputs.v86_version }}
-          LABEL: ${{ steps.rel.outputs.tag }}
+          V86_VERSION: ${{ steps.v86.outputs.version }}
+          LABEL: ${{ matrix.release_tag }}
+          LEVELS: ${{ steps.settings.outputs.levels }}
         run: LAB_JSON=lab/lab.json bash polyci/scripts/assemble-site.sh out v86src/bios site
 
-      - name: Browser test of the page (headless Chrome)
-        if: steps.ready.outputs.ready == 'true'
-        timeout-minutes: 15
+      # ---- tests (build only), boot test and page test side by side ----
+      - name: Cache the page test's browser driver
+        if: matrix.mode == 'build'
+        id: pt-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/polyci-page-test
+          key: puppeteer-core-24-${{ runner.os }}
+
+      - name: Install the page test's browser driver
+        if: matrix.mode == 'build' && steps.pt-cache.outputs.cache-hit != 'true'
+        run: npm install --prefix ~/.cache/polyci-page-test --silent --no-audit --no-fund puppeteer-core@24
+
+      - name: Boot test (QEMU) and page test (Chrome), in parallel
+        if: matrix.mode == 'build'
+        timeout-minutes: 30
+        env:
+          BOOT_TEST: ${{ matrix.boot_test }}
+          USERS: ${{ steps.settings.outputs.users }}
+          LEVELS: ${{ steps.settings.outputs.levels }}
         run: |
-          pt="$RUNNER_TEMP/page-test"
-          npm install --prefix "$pt" --silent --no-audit --no-fund puppeteer-core@24
+          # Tools image: wait for the background pull to finish.
+          while [ ! -f "$RUNNER_TEMP/pull.rc" ]; do sleep 1; done
+          [ "$(cat "$RUNNER_TEMP/pull.rc")" = 0 ] || { cat "$RUNNER_TEMP/pull.log"; echo "::error::could not pull $TOOLS_IMAGE"; exit 1; }
+          kvm=(); flag=
+          if [ -e /dev/kvm ]; then kvm=(--device /dev/kvm); flag=--kvm; fi
+          echo "KVM: ${flag:-not available, using emulation}"
+
+          docker run --rm "${kvm[@]}" -v "$PWD:/w" -w /w "$TOOLS_IMAGE" \
+            python3 polyci/scripts/boot-test.py --flavor "$BOOT_TEST" --users "$USERS" --levels "$LEVELS" \
+              --kernel out/packaged.bzImage --initrd out/packaged.rootfs.cpio.gz --log out/boot.log $flag \
+            > out/boot-test.txt 2>&1 &
+          boot=$!
+
+          pt=~/.cache/polyci-page-test
           cp polyci/scripts/page-test.mjs "$pt/"
           python3 -m http.server 8080 --directory site --bind 127.0.0.1 >/dev/null 2>&1 &
-          node "$pt/page-test.mjs" http://127.0.0.1:8080/ out/page-shots "$USERS"
+          node "$pt/page-test.mjs" http://127.0.0.1:8080/ out/page-shots "$USERS" > out/page-test.txt 2>&1 &
+          page=$!
 
-      - name: Upload page screenshots
-        if: always() && steps.ready.outputs.ready == 'true'
+          b=0; wait "$boot" || b=$?
+          p=0; wait "$page" || p=$?
+          # Print each log in full; their ::error:: lines become annotations.
+          echo "::group::Boot test (exit $b)"; cat out/boot-test.txt; echo "::endgroup::"
+          echo "::group::Page test (exit $p)"; cat out/page-test.txt; echo "::endgroup::"
+          grep -h '^::error::' out/boot-test.txt out/page-test.txt || true
+          echo "boot test: $([ $b = 0 ] && echo passed || echo FAILED)   page test: $([ $p = 0 ] && echo passed || echo FAILED)"
+          [ "$b" = 0 ] && [ "$p" = 0 ]
+
+      - name: Upload test logs and screenshots
+        if: always() && matrix.mode == 'build'
         uses: actions/upload-artifact@v7
         with:
-          name: page-screenshots-${{ matrix.lab }}
-          path: out/page-shots/
+          name: tests-${{ matrix.lab }}
+          path: |
+            out/boot.log
+            out/boot-test.txt
+            out/page-test.txt
+            out/page-shots/
           if-no-files-found: ignore
 
       - name: Release files
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode == 'build'
         env:
-          TAG: ${{ steps.rel.outputs.tag }}
           REPO: ${{ matrix.repo }}
         run: |
           mkdir -p dist
@@ -242,13 +327,14 @@ jobs:
           sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
           base = json.load(open("base/baseline.json"))
           info = {
-              "tag": e["TAG"], "lab": e["LAB"], "title": e["TITLE"],
+              "tag": e["RELEASE_TAG"], "lab": e["LAB"], "title": e["TITLE"],
               "lab_repo": e["REPO"], "lab_commit": e["REF"], "lab_folder": e["SUBDIR"],
               "baseline": {"tag": e["BASELINE_TAG"], "type": e["BASELINE_TYPE"],
                            "kernel_sha256": base["kernel_sha256"], "rootfs_sha256": base["rootfs_sha256"]},
               "lab_cpio_sha256": sha("dist/lab.cpio.gz"),
               "packaged_rootfs_sha256": sha("dist/packaged.rootfs.cpio.gz"),
               "join": "packaged.rootfs.cpio.gz = baseline rootfs.cpio.gz + lab.cpio.gz (byte concatenation)",
+              "fingerprint": e["FINGERPRINT"],
               "polyci_commit": e["GITHUB_SHA"],
               "built_by": f'{e["GITHUB_SERVER_URL"]}/{e["GITHUB_REPOSITORY"]}/actions/runs/{e["GITHUB_RUN_ID"]}',
           }
@@ -258,28 +344,37 @@ jobs:
           cat dist/release.json
 
       - name: Upload images
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode == 'build'
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.rel.outputs.tag }}
+          name: ${{ matrix.release_tag }}
           path: dist/
 
       - name: Upload site for the Pages deploy
-        if: steps.ready.outputs.ready == 'true'
+        if: matrix.mode != 'skip'
         uses: actions/upload-artifact@v7
         with:
           name: site-${{ matrix.lab }}
           path: site/
           retention-days: 7
 
-      - name: Publish ${{ steps.rel.outputs.tag }}
-        if: steps.ready.outputs.ready == 'true' && needs.plan.outputs.publish == 'true'
+      - name: Publish ${{ matrix.release_tag }}
+        if: matrix.mode == 'build' && needs.plan.outputs.publish == 'true'
         env:
-          TAG: ${{ steps.rel.outputs.tag }}
           REPO: ${{ matrix.repo }}
         run: |
-          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "$TAG already published (same lab commit on the same baseline); nothing to do."
+          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Same lab commit on the same baseline, rebuilt because PolyCI's
+            # pipeline changed. Packaging is reproducible, so if the images are
+            # byte-identical, just record the new fingerprint; never replace images.
+            gh release download "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" -p release.json -O old-release.json
+            same=$(python3 -c "import json; o=json.load(open('old-release.json')); n=json.load(open('dist/release.json')); print(o['packaged_rootfs_sha256']==n['packaged_rootfs_sha256'] and o['lab_cpio_sha256']==n['lab_cpio_sha256'])")
+            if [ "$same" = True ]; then
+              gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --clobber dist/release.json dist/SHA256SUMS
+              echo "$RELEASE_TAG: images unchanged; recorded the new pipeline fingerprint." | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::$RELEASE_TAG already exists with different images (PolyCI's packaging changed). Left it unchanged; this lab will keep fully rebuilding until its commit or baseline changes, or you delete that release so it can be republished."
+            fi
             exit 0
           fi
           cat > notes.md <<EOF
@@ -293,29 +388,32 @@ jobs:
 
           Boot \`packaged.bzImage\` with \`packaged.rootfs.cpio.gz\` as the initrd (v86 or QEMU).
           EOF
-          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
+          gh release create "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
             --title "$TITLE (${REF:0:7} on $BASELINE_TYPE ${BASELINE_TAG##*-})" --notes-file notes.md \
             dist/packaged.bzImage dist/packaged.rootfs.cpio.gz dist/lab.cpio.gz \
             dist/lab-manifest.txt dist/release.json dist/SHA256SUMS
-          echo "Published **$TAG**" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published **$RELEASE_TAG**" >> "$GITHUB_STEP_SUMMARY"
 
   # One required check for branch protection, however many labs there are.
   all-labs:
     name: all labs pass
-    needs: lab
+    needs: [plan, tools, lab]
     if: always()
     runs-on: ubuntu-24.04
     steps:
       - env:
-          RESULT: ${{ needs.lab.result }}
+          PLAN: ${{ needs.plan.result }}
+          TOOLS: ${{ needs.tools.result }}
+          LAB: ${{ needs.lab.result }}
         run: |
-          echo "lab jobs: $RESULT"
-          [ "$RESULT" = success ] || [ "$RESULT" = skipped ]
+          echo "plan: $PLAN  tools: $TOOLS  labs: $LAB"
+          [ "$PLAN" = success ] || exit 1
+          for r in "$TOOLS" "$LAB"; do [ "$r" = success ] || [ "$r" = skipped ] || exit 1; done
 
   pages:
     name: Deploy to GitHub Pages
     needs: [plan, lab]
-    if: needs.plan.outputs.publish == 'true'
+    if: always() && needs.plan.outputs.publish == 'true' && needs.lab.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

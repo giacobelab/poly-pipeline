@@ -72,7 +72,8 @@ A new release appears only when a lab commit or its baseline changes.
   "labs": {
     "polybandit3.1": { "title": "PolyBandit 3.1", "repo": "giacobe/polybandit3.1", "ref": "<sha>",
                        "subdir": ".", "baseline": "filesystem", "self_test": "test.sh",
-                       "boot_test": "v31", "users": "bandit{n}", "levels": 13 }
+                       "boot_test": "v31" },
+    "polylinux-networking": { "...": "...", "users": "level{n}", "levels": 10 }
   }
 }
 ```
@@ -84,11 +85,15 @@ A new release appears only when a lab commit or its baseline changes.
   Blank: labs of that type are skipped (reported, not failed).
 - `labs.<id>.subdir` is the folder that becomes `/root`; `rename` renames files
   inside it (e.g. `installbandit.sh` → `install.sh`).
-- `labs.<id>.boot_test`: `v31` / `v3` check PolyBandit answers and screens
+- `labs.<id>.boot_test`: `v31` checks PolyBandit 3.1 answers and screens
   exactly; `generic` works for any PolyLinux lab (installer logs in as the
   first user, `nextlevel` reaches every level's user).
 - `labs.<id>.self_test`: optional script in the lab repo to run first (e.g.
   `test.sh`).
+- Level users and the number of levels come from the lab's own `lab.json`
+  (`user_pattern`, `level_count`). Set `users` / `levels` here only for a lab
+  without a `lab.json` (like polylinux-networking), or to override it; a
+  mismatch with `lab.json` shows as a warning.
 
 ## Workflows
 
@@ -96,9 +101,31 @@ A new release appears only when a lab commit or its baseline changes.
 |---|---|---|
 | **Publish baseline** (`baseline.yml`) | by hand, per type | Build, smoke-boot, publish `baseline-<type>-<hash>` as a pre-release |
 | **Build labs** (`labs.yml`) | push, PR, weekly, by hand | Per lab: overlay, join, test; on `main`: releases + Pages |
+| **Propose lab updates** (`update-labs.yml`) | weekly, by hand | PR moving lab refs to their repos' newest commits |
 
 The required check for branch protection is **`all labs pass`**: one check,
 however many labs there are.
+
+### What "Build labs" does per lab
+
+`scripts/plan.py` gives each lab a mode, shown in the run summary:
+
+| Mode | When | What runs | Time |
+|---|---|---|---|
+| `build` | new lab commit or baseline, PolyCI's pipeline changed, weekly run, or **force** | overlay, join, image check, then boot test (QEMU) and page test (Chrome) in parallel; publish on `main` | minutes |
+| `reuse` | `<lab>-<commit>-<hash>-release` exists and was made by this exact pipeline | download the released images, rebuild the page | seconds |
+| `skip` | no baseline pinned for the lab's type | nothing | — |
+
+"This exact pipeline" is a fingerprint, recorded in each release's
+`release.json`, of `scripts/`, `web/`, `tools/Dockerfile`, `labs.yml`, the v86
+settings and the lab's `polyci.json` entry. Change any of them and affected
+labs rebuild and retest. Packaging is reproducible, so if the rebuilt images
+are byte-identical, the existing release just gets the new fingerprint; a
+release's images are never replaced.
+
+The QEMU boot test runs in a prepared image, `ghcr.io/<owner>/polyci-qemu`,
+built from `tools/Dockerfile` by the `tools` job only when that file changes.
+The page test uses the runner's Chrome with a cached `puppeteer-core`.
 
 ## Day-to-day
 
@@ -111,8 +138,20 @@ however many labs there are.
 4. Pin it: set `baselines.TYPE.release` to `TAG` in `polyci.json` in a PR.
    Merging releases every lab of that type and updates Pages.
 
-**A lab changed upstream:** update its `ref` in `polyci.json` in a PR. The PR
-runs the full pipeline; merging publishes the new release.
+**A lab changed upstream:** every Monday, **Propose lab updates** opens (or
+refreshes) one PR moving each changed lab's `ref` to its newest commit, with
+compare links. The PR runs the full pipeline; merging publishes the new
+releases. You can also run it by hand, or edit a `ref` yourself.
+
+Pull requests opened with the built-in token don't start other workflows. To
+have CI run on these PRs automatically, add a repository secret
+`POLYCI_BOT_TOKEN`: a fine-grained personal access token for this repository
+with **Contents** and **Pull requests** set to read and write. Without it, close
+and reopen the PR to start CI. Either way, allow Actions to open PRs:
+**Settings → Actions → General → Allow GitHub Actions to create and approve
+pull requests**.
+
+**Rebuild everything:** **Build labs** → Run workflow with **force**.
 
 **A new lab:** add an entry to `labs`. Use `"boot_test": "generic"` unless it
 needs exact answer checks.

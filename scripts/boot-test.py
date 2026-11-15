@@ -9,7 +9,6 @@
   5. `nextlevel` walks through every level up to the last one
 
 --flavor picks how much is checked:
-  v3       PolyBandit 3.0 (original answer scheme, "Welcome to The PolyLinux Game")
   v31      PolyBandit 3.1 (seed-v1 answers, exercise code, staged level readiness)
   generic  any PolyLinux lab: the installer logs in as the first user, and
            nextlevel reaches every level's user (checked with whoami); the
@@ -26,11 +25,6 @@ SYSTEM_PASSWORD = "systemPassword"      # installer default
 LEVEL_PASSWORD_ROOT = "levelPassword"   # installer default
 
 FLAVORS = {
-    "v3": {
-        "banner": "Welcome to The PolyLinux Game",
-        "date_cmd": 'date +"%m-%d-%Y"',
-        "readme_marker": "Instructions for this level",
-    },
     "v31": {
         "banner": "PolyLinux: PolyBandit",
         "date_cmd": 'date +"%Y-%m-%d"',
@@ -55,11 +49,6 @@ def fail(msg, tail=""):
 
 def expected_answer(flavor, email, guest_date, level):
     """Answer for one level, computed independently of the guest's scripts."""
-    if flavor == "v3":
-        h = hashlib.sha256(
-            f"{email}{guest_date}{SYSTEM_PASSWORD}{LEVEL_PASSWORD_ROOT}{level}".encode()
-        ).hexdigest()
-        return base64.b64encode((h + "\n").encode()).decode()[:20]
     # v31: level_seed_v1 in polylinux-common.sh, answer_token in resources.sh
     fields = ["polylinux-seed-v1", "polybandit", email.strip().lower(), guest_date,
               SYSTEM_PASSWORD, f"{LEVEL_PASSWORD_ROOT}{level}", str(level)]
@@ -112,7 +101,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--kernel")
     ap.add_argument("--initrd")
-    ap.add_argument("--flavor", choices=sorted(FLAVORS), default="v3")
+    ap.add_argument("--flavor", choices=sorted(FLAVORS), default="generic")
     ap.add_argument("--levels", type=int, default=13)
     ap.add_argument("--users", default="bandit{n}", help="level user name pattern (generic flavor)")
     ap.add_argument("--log", default="boot.log")

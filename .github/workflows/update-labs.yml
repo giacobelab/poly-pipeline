@@ -1,0 +1,63 @@
+name: Propose lab updates
+
+# Weekly: if any lab repo has new commits on its default branch, open (or
+# refresh) one pull request that moves the lab's pinned ref in polyci.json.
+# The full lab pipeline runs on that PR; merging it publishes the new releases.
+#
+# Token: pull requests opened with the built-in GITHUB_TOKEN do NOT trigger
+# other workflows, so "Build labs" would not run on the PR by itself. Add a
+# repository secret POLYCI_BOT_TOKEN (a fine-grained personal access token for
+# this repo with Contents and Pull requests: read and write) and it is used
+# instead. Without it, the PR is still opened; close and reopen it to start CI.
+
+on:
+  schedule:
+    - cron: '23 11 * * 1'   # Mondays, early morning US Eastern
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: update-labs
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    env:
+      BRANCH: polyci/lab-updates
+      GH_TOKEN: ${{ secrets.POLYCI_BOT_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.POLYCI_BOT_TOKEN || github.token }}
+
+      - name: Check lab repos for new commits
+        id: bump
+        run: python3 scripts/bump-labs.py --body "$RUNNER_TEMP/body.md" --github-output "$GITHUB_OUTPUT"
+
+      - name: Open or update the pull request
+        if: steps.bump.outputs.changed == 'true'
+        env:
+          HAS_BOT_TOKEN: ${{ secrets.POLYCI_BOT_TOKEN != '' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git commit -am "Move lab refs to their newest commits"
+          git push --force origin "$BRANCH"
+          [ "$HAS_BOT_TOKEN" = true ] || printf '\n> Opened with the built-in token, so CI will not start on its own: close and reopen this PR to run it (or add a POLYCI_BOT_TOKEN secret).\n' >> "$RUNNER_TEMP/body.md"
+          if pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number') && [ -n "$pr" ]; then
+            gh pr edit "$pr" --body-file "$RUNNER_TEMP/body.md"
+            echo "Updated PR #$pr" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr create --head "$BRANCH" --base "${{ github.event.repository.default_branch }}" \
+              --title "Update pinned lab commits" --body-file "$RUNNER_TEMP/body.md"
+            echo "Opened a PR from $BRANCH" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Nothing to do
+        if: steps.bump.outputs.changed != 'true'
+        run: echo "All labs are at their newest commits." >> "$GITHUB_STEP_SUMMARY"
