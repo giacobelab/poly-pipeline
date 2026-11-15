@@ -4,7 +4,7 @@ name: Build labs
 # empty run-name falls back to it.
 run-name: >-
   ${{ github.event_name != 'workflow_dispatch' && ' ' ||
-      inputs.baseline_override != '' && format('Build labs: test {0}', inputs.baseline_override) ||
+      inputs.baseline_override != '' && format('Build labs: test {0}{1}', inputs.baseline_override, inputs.promote && ' and pin' || '') ||
       inputs.labs != '' && format('Build labs: {0}', inputs.labs) ||
       inputs.force && 'Build labs: full rebuild' || 'Build labs' }}
 
@@ -35,8 +35,12 @@ on:
         description: Only these labs (comma-separated ids from polyci.json; blank = all)
         default: ''
       baseline_override:
-        description: Test a baseline before pinning it, as TYPE=TAG (e.g. filesystem=baseline-filesystem-0123abcd45)
+        description: Test baseline pre-release(s) before pinning, e.g. baseline-networking-fc3d6448a7 (comma-separate several)
         default: ''
+      promote:
+        description: If every lab passes on the override, mark those baselines as full releases and open a PR pinning them in polyci.json
+        type: boolean
+        default: false
       force:
         description: Rebuild and retest every lab, even ones already released by this pipeline
         type: boolean
@@ -61,6 +65,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
       any_build: ${{ steps.plan.outputs.any_build }}
+      overrides: ${{ steps.plan.outputs.overrides }}
       publish: ${{ steps.publish.outputs.publish }}
     steps:
       - uses: actions/checkout@v7
@@ -417,6 +422,69 @@ jobs:
           echo "plan: $PLAN  tools: $TOOLS  labs: $LAB"
           [ "$PLAN" = success ] || exit 1
           for r in "$TOOLS" "$LAB"; do [ "$r" = success ] || [ "$r" = skipped ] || exit 1; done
+
+  # After a passing baseline test with "promote": un-pre-release the tested
+  # baselines and open (or refresh) a PR that pins them in polyci.json.
+  # main is protected, so the pin lands through review and the required
+  # check; merging it publishes the labs on the new baseline. Same token
+  # note as update-labs.yml: with only GITHUB_TOKEN, CI will not start on the
+  # PR by itself (close and reopen it, or add POLYCI_BOT_TOKEN).
+  pin:
+    name: Promote and pin tested baselines
+    needs: [plan, lab, all-labs]
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' && inputs.promote &&
+      needs.all-labs.result == 'success' && needs.lab.result == 'success' &&
+      needs.plan.outputs.overrides != '{}' && needs.plan.outputs.overrides != '' &&
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write        # edit the baseline releases, push the PR branch
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.POLYCI_BOT_TOKEN || github.token }}
+      OVERRIDES: ${{ needs.plan.outputs.overrides }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          token: ${{ secrets.POLYCI_BOT_TOKEN || github.token }}
+
+      - name: Mark the tested baselines as full releases
+        run: |
+          for tag in $(python3 -c 'import json,os; print(" ".join(json.loads(os.environ["OVERRIDES"]).values()))'); do
+            gh release edit "$tag" -R "$GITHUB_REPOSITORY" --prerelease=false --latest=false
+            echo "Promoted **$tag**" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - name: Open or update the pin pull request
+        env:
+          BRANCH: polyci/pin-baselines
+          HAS_BOT_TOKEN: ${{ secrets.POLYCI_BOT_TOKEN != '' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 scripts/pin-baselines.py "$OVERRIDES" | tee changes.txt
+          if git diff --quiet polyci.json; then
+            echo "polyci.json already pins these baselines; no PR needed." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          { echo "Pins baseline(s) that passed every lab test in $RUN_URL:"; echo
+            sed 's/^/- /' changes.txt; echo
+            echo "They are now full releases. Merging this publishes the labs on them."
+            [ "$HAS_BOT_TOKEN" = true ] || printf '\n> Opened with the built-in token, so CI will not start on its own: close and reopen this PR to run it (or add a POLYCI_BOT_TOKEN secret).\n'
+          } > body.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git commit -m "Pin tested baselines" polyci.json
+          git push --force origin "$BRANCH"
+          if pr=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number') && [ -n "$pr" ]; then
+            gh pr edit "$pr" --body-file body.md
+            echo "Updated PR #$pr" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh pr create --head "$BRANCH" --base "${{ github.event.repository.default_branch }}" \
+              --title "Pin tested baselines" --body-file body.md
+            echo "Opened a PR from $BRANCH" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   pages:
     name: Deploy to GitHub Pages
