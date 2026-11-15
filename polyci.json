@@ -54,17 +54,6 @@
       "users": "bandit{n}",
       "levels": 13
     },
-    "polybandit3.0": {
-      "title": "PolyBandit 3.0",
-      "repo": "ruffm/polybandit3",
-      "ref": "65d39b9c4af342445a577f523aacb463b483dfa5",
-      "subdir": "polybandit3.0",
-      "rename": { "installbandit.sh": "install.sh" },
-      "baseline": "filesystem",
-      "boot_test": "v3",
-      "users": "bandit{n}",
-      "levels": 13
-    },
     "polylinux-basic": {
       "title": "PolyLinux Basic",
       "repo": "giacobe/polylinux-basic",
