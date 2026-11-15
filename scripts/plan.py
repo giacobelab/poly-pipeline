@@ -59,8 +59,8 @@ def main():
             die(f"labs.{lab_id} uses baseline {btype!r}, which is disabled")
         if not SHA.match(lab["ref"]):
             die(f"labs.{lab_id}.ref must be a full 40-character commit SHA")
-        if lab.get("boot_test") not in ("v3", "v31", "generic"):
-            die(f"labs.{lab_id}.boot_test must be v3, v31 or generic")
+        if lab.get("boot_test") not in ("v31", "generic"):
+            die(f"labs.{lab_id}.boot_test must be v31 or generic")
         renames = " ".join(f"--rename {k}={v}" for k, v in sorted(lab.get("rename", {}).items()))
         matrix.append({
             "lab": lab_id,

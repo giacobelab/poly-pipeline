@@ -84,7 +84,7 @@ A new release appears only when a lab commit or its baseline changes.
   Blank: labs of that type are skipped (reported, not failed).
 - `labs.<id>.subdir` is the folder that becomes `/root`; `rename` renames files
   inside it (e.g. `installbandit.sh` → `install.sh`).
-- `labs.<id>.boot_test`: `v31` / `v3` check PolyBandit answers and screens
+- `labs.<id>.boot_test`: `v31` checks PolyBandit 3.1 answers and screens
   exactly; `generic` works for any PolyLinux lab (installer logs in as the
   first user, `nextlevel` reaches every level's user).
 - `labs.<id>.self_test`: optional script in the lab repo to run first (e.g.
