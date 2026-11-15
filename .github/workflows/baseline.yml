@@ -1,4 +1,6 @@
 name: Publish baseline
+# Each run is listed as "Publish baseline-<type>", e.g. Publish baseline-networking.
+run-name: Publish baseline-${{ inputs.type }}
 
 # Builds one baseline type from polyci.json (kernel + base rootfs, no lab) and
 # publishes it as a PRE-RELEASE tagged baseline-<type>-<hash>, where <hash>
@@ -30,6 +32,7 @@ jobs:
   # artifact, so if publishing fails, "Re-run failed jobs" only re-runs the
   # quick publish job below, not the build.
   baseline:
+    name: Build baseline-${{ inputs.type }}
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     outputs:
@@ -234,7 +237,7 @@ jobs:
       - name: Save release files for the publish job
         uses: actions/upload-artifact@v7
         with:
-          name: baseline-release
+          name: baseline-${{ inputs.type }}-release
           path: |
             dist/
             notes.md
@@ -242,7 +245,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: Publish pre-release
+    name: Publish baseline-${{ inputs.type }} pre-release
     needs: baseline
     runs-on: ubuntu-24.04
     permissions:
@@ -251,7 +254,7 @@ jobs:
       - name: Download release files
         uses: actions/download-artifact@v8
         with:
-          name: baseline-release
+          name: baseline-${{ inputs.type }}-release
           path: .
 
       - name: Publish ${{ needs.baseline.outputs.tag }} as a pre-release
