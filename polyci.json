@@ -1,18 +1,15 @@
 {
-  "_comment": "Everything PolyCI builds, pinned. Change a ref or a baseline release here, in a pull request; CI does the rest. See README.md.",
-
+  "_comment": "Everything PolyCI builds, pinned. Change a ref or a baseline release here, in a pull request; CI does the rest. Level users and counts come from each lab's lab.json; set 'users'/'levels' on a lab only if it has no lab.json (or to override it). See README.md.",
   "builder": {
     "repo": "giacobe/buildroot-builder2",
     "ref": "b6fb25fcadbd536a64ca7116f1c12e6daa7b5fd8",
     "buildroot_version": "2025.02.15"
   },
-
   "v86": {
     "npm_version": "0.5.473",
     "bios_repo": "copy/v86",
     "bios_ref": "315b2b0b758703ef0e6cc7b4088d6068f83f3c20"
   },
-
   "baselines": {
     "basic": {
       "description": "Basic shell commands (builder config set 'basic')",
@@ -41,7 +38,6 @@
       "release": ""
     }
   },
-
   "labs": {
     "polybandit3.1": {
       "title": "PolyBandit 3.1",
@@ -50,9 +46,7 @@
       "subdir": ".",
       "baseline": "filesystem",
       "self_test": "test.sh",
-      "boot_test": "v31",
-      "users": "bandit{n}",
-      "levels": 13
+      "boot_test": "v31"
     },
     "polylinux-basic": {
       "title": "PolyLinux Basic",
@@ -60,9 +54,7 @@
       "ref": "e08e56b2a73386043fafc8bd0c59f811b6f0262c",
       "subdir": ".",
       "baseline": "basic",
-      "boot_test": "generic",
-      "users": "level{n}",
-      "levels": 10
+      "boot_test": "generic"
     },
     "polylinux-networking": {
       "title": "PolyLinux Networking",

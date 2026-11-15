@@ -21,7 +21,7 @@ for lab_id, lab in labs.items():
     info = json.loads(build.read_text())
     cards.append(f'''    <a class="card" href="{html.escape(lab_id)}/">
       <h2>{html.escape(lab.get("title", lab_id))}</h2>
-      <p>{lab["levels"]} levels &middot; {html.escape(info.get("label", ""))}</p>
+      <p>{f'{info["levels"]} levels &middot; ' if info.get("levels") else ""}{html.escape(info.get("label", ""))}</p>
       <span class="go">Start &rarr;</span>
     </a>''')
 
