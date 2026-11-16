@@ -65,8 +65,12 @@ await waitFor(`${visible} logged in`, () => document.getElementById("status-text
 for (const name of hidden) {
   await waitFor(`${name} at its login prompt`, n => window.polylab.state[n] === "running", BOOT_S, name);
 }
-// Give the lab's traffic a little time to flow.
-await new Promise(r => setTimeout(r, 20000));
+// Wait until every VM has sent some traffic (the lab's programs start after
+// the login prompt, and Python starts slowly in v86), then let it flow a bit.
+await waitFor("network traffic from every VM", names =>
+  names.every(n => (window.polylab.frames[n] || 0) >= 5), Number(process.env.PAGE_TRAFFIC_TIMEOUT || 240),
+  [visible, ...hidden]);
+await new Promise(r => setTimeout(r, 10000));
 
 await page.evaluate(() => window.emulator.keyboard_send_text(
   "clear; echo IP:; ip -4 -o addr show eth0; echo NEIGH:; ip neigh show dev eth0; " +

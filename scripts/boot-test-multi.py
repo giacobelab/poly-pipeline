@@ -25,7 +25,8 @@ import argparse, datetime, functools, json, os, re, shlex, socket, struct, sys, 
 import pexpect
 
 print = functools.partial(print, flush=True)
-BASE_CMDLINE = "console=ttyS0 panic=-1 tsc=reliable mitigations=off random.trust_cpu=on"
+# net.ifnames=0: keep eth0 (udev would rename it to enp0s3), as the page does.
+BASE_CMDLINE = "console=ttyS0 panic=-1 tsc=reliable mitigations=off random.trust_cpu=on net.ifnames=0"
 STAGE = ["starting"]
 
 
@@ -95,7 +96,11 @@ def identity(email, date):
 
 def login(vm, name, timeout):
     STAGE[0] = f"waiting for {name} to reach a login prompt"
-    i = vm.expect([r"login: ?$", r"login: ", r"Kernel panic[^\r\n]*", pexpect.EOF, pexpect.TIMEOUT], timeout=timeout)
+    i = vm.expect([r"login: ?$", r"login: ", r"Kernel panic[^\r\n]*", pexpect.EOF, pexpect.TIMEOUT,
+                   r"Initramfs unpacking failed[^\r\n]*"], timeout=timeout)
+    if i == 5:
+        fail(f"{name}: the image does not fit in its memory ({vm.after.strip()}); "
+             f"raise this VM's memory_mb in polyci.json", vm)
     if i > 1:
         fail(f"{name}: {['', '', 'kernel panic', 'QEMU exited', 'no login prompt'][i]}", vm)
     STAGE[0] = f"logging in to {name}"
@@ -161,6 +166,10 @@ def main():
         print(info.strip())
         print("::endgroup::")
 
+    STAGE[0] = "waiting for network traffic from every VM"
+    deadline = time.time() + 240
+    while time.time() < deadline and not all(hub.frames.get(m, 0) >= 5 for m in macs.values()):
+        time.sleep(2)
     STAGE[0] = "letting the lab's traffic flow"
     time.sleep(a.settle)
     print(f"frames through the hub: { {n: hub.frames.get(m, 0) for n, m in macs.items()} }")

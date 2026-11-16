@@ -77,7 +77,9 @@ generate traffic in the background. They need:
 defender on the page, with the screen and keyboard. Each hidden VM runs in its
 own Web Worker (`web/vm-worker.js`), so it gets its own CPU core, and starts a
 few seconds after the one before it. The page passes every Ethernet frame a VM
-sends to all the others, like a hub. Nothing leaves the page, and other tabs
+sends to all the others, like a hub. Every VM boots with `net.ifnames=0`, so
+its card stays `eth0` (the Snort baselines use udev, which would rename it to
+`enp0s3`, and the labs' scripts wait for `eth0`). Nothing leaves the page, and other tabs
 are not connected. The exercise date is today, unless the link sets
 `?date=YYYY-MM-DD` (e.g. for a whole class).
 
@@ -131,7 +133,8 @@ and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
 - `baselines.<type>.release` pins the promoted baseline release labs use.
   Blank: labs of that type are skipped (reported, not failed).
 - `labs.<id>.vms` makes a multi-VM lab (see above): one entry per VM, with
-  `repo`, `ref`, `baseline`, `memory_mb` (128–1024), and `"visible": true` on
+  `repo`, `ref`, `baseline`, `memory_mb` (128–1024; the image unpacks into it,
+  so the Snort VMs need 256), and `"visible": true` on
   exactly one. `overlay` sets the folder (`subdir`), where it goes (`dest`),
   and the repo's `permissions` and `checksums` files. The weekly update PR
   moves each VM's `ref` on its own.

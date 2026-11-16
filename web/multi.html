@@ -99,7 +99,9 @@
 // (polylab_email_hex, polylab_date, polylab_code), which the lab's own scripts
 // read to derive addresses, stage values and flags.
 
-const BASE_CMDLINE = "console=ttyS0 nomodeset tsc=reliable mitigations=off random.trust_cpu=on";
+// net.ifnames=0 keeps the NIC named eth0: images built with udev (the Snort
+// baselines) would otherwise rename it to enp0s3, and the labs' scripts wait for eth0.
+const BASE_CMDLINE = "console=ttyS0 nomodeset tsc=reliable mitigations=off random.trust_cpu=on net.ifnames=0";
 const STAGGER_MS = 4000;   // start hidden VMs one by one, after the visible VM
 
 const $ = id => document.getElementById(id);

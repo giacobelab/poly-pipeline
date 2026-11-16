@@ -106,13 +106,13 @@
           "repo": "giacobe/netsec-snort-attacker",
           "ref": "f0c8e4652e02debe15eb23a753f26d8c6baec163",
           "baseline": "snort-attacker",
-          "memory_mb": 192
+          "memory_mb": 256
         },
         "noise": {
           "repo": "giacobe/netsec-snort-noise",
           "ref": "fcaff4b79adcf677ea8d6a10754ada01a58cc491",
           "baseline": "snort-attacker",
-          "memory_mb": 192
+          "memory_mb": 256
         }
       }
     }
