@@ -164,7 +164,9 @@ releases. Can also run it by hand.
 Pull requests opened with the built-in token don't start other workflows. To
 have CI run on these PRs automatically, add a repository secret
 `POLYCI_BOT_TOKEN`: a fine-grained personal access token for this repository
-with **Contents** and **Pull requests** set to read and write. Without it, close
+with **Contents** and **Pull requests** set to read and write. 
+
+Without it, close
 and reopen the PR to start CI. Either way, allow Actions to open PRs:
 **Settings → Actions → General → Allow GitHub Actions to create and approve
 pull requests**.
