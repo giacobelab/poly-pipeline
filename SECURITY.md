@@ -10,7 +10,7 @@ supported. Older lab and baseline releases are not patched; they are replaced.
 Please **do not open a public issue** for a security problem.
 
 Report it privately through GitHub: **Security** tab → **Report a
-vulnerability**. If that is not available, email **[CONTACT EMAIL]**.
+vulnerability**. If that is not available, email mruff[at]psu[.]edu.
 
 Include what you found, how to reproduce it, and what an attacker could do with
 it. You should get an acknowledgement within 7 days and an update on a fix
