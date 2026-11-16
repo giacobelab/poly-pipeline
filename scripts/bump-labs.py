@@ -4,7 +4,7 @@ repo's default branch, and describe what changed.
 
   bump-labs.py [--body FILE] [--github-output FILE]
 
-Only labs.<id>.ref is changed. The builder and from_lab baseline configs are
+Only labs.<id>.ref (or labs.<id>.vms.<vm>.ref) is changed. The builder and from_lab baseline configs are
 checked too, but only reported: moving them means building and promoting a
 new baseline, which should be a deliberate step.
 Writes changed=true|false (and the PR body) for GitHub Actions.
@@ -33,13 +33,16 @@ def main():
     bumped, notes, problems = [], [], []
 
     for lab_id, lab in cfg["labs"].items():
-        new = head(lab["repo"])
-        if new is None:
-            problems.append(f"- `{lab_id}`: could not read {lab['repo']}")
-        elif new != lab["ref"]:
-            bumped.append(f"- **{lab.get('title', lab_id)}** (`{lab_id}`): "
-                          f"[`{lab['ref'][:7]}…{new[:7]}`](https://github.com/{lab['repo']}/compare/{lab['ref']}...{new})")
-            lab["ref"] = new
+        # A multi-VM lab pins one repo per VM; each is moved on its own.
+        targets = [(f"{lab_id}/{n}", v) for n, v in lab["vms"].items()] if "vms" in lab else [(lab_id, lab)]
+        for label, entry in targets:
+            new = head(entry["repo"])
+            if new is None:
+                problems.append(f"- `{label}`: could not read {entry['repo']}")
+            elif new != entry["ref"]:
+                bumped.append(f"- **{lab.get('title', lab_id)}** (`{label}`): "
+                              f"[`{entry['ref'][:7]}…{new[:7]}`](https://github.com/{entry['repo']}/compare/{entry['ref']}...{new})")
+                entry["ref"] = new
 
     for what, repo, ref in [("builder", cfg["builder"]["repo"], cfg["builder"]["ref"])] + [
             (f"baseline `{name}` config", b["from_lab"]["repo"], b["from_lab"]["ref"])

@@ -64,6 +64,8 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       count: ${{ steps.plan.outputs.count }}
+      groups: ${{ steps.plan.outputs.groups }}
+      group_count: ${{ steps.plan.outputs.group_count }}
       any_build: ${{ steps.plan.outputs.any_build }}
       overrides: ${{ steps.plan.outputs.overrides }}
       publish: ${{ steps.publish.outputs.publish }}
@@ -407,10 +409,199 @@ jobs:
             dist/lab-manifest.txt dist/release.json dist/SHA256SUMS
           echo "Published **$RELEASE_TAG**" >> "$GITHUB_STEP_SUMMARY"
 
+  # Labs made of several VMs on one page (labs.<id>.vms, e.g. netsec-snort).
+  # Same modes as the lab job; scripts/group.py does the per-VM work.
+  group:
+    name: lab (${{ matrix.lab }}, ${{ join(matrix.vms.*.name, ' + ') }})
+    needs: [plan, tools]
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.group_count != '0' && needs.tools.result != 'failure' && needs.tools.result != 'cancelled'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    permissions:
+      contents: write   # publish <lab>-...-release (only on the default branch)
+      packages: read    # pull the tools image
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.groups) }}
+    env:
+      LAB: ${{ matrix.lab }}
+      TITLE: ${{ matrix.title }}
+      RELEASE_TAG: ${{ matrix.release_tag }}
+      MODE: ${{ matrix.mode }}
+      TOOLS_IMAGE: ${{ needs.tools.outputs.image }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: "Mode: ${{ matrix.mode }}"
+        env:
+          WHY: ${{ matrix.why }}
+        run: |
+          echo "$LAB: $MODE ($WHY)"
+          echo "**$LAB**: $MODE ($WHY)" >> "$GITHUB_STEP_SUMMARY"
+          [ "$MODE" != skip ] || echo "::notice::$LAB skipped: $WHY. Run Publish baseline, then pin it in polyci.json."
+
+      - name: Start pulling the tools image
+        if: matrix.mode == 'build'
+        run: |
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          ( docker pull -q "$TOOLS_IMAGE" > "$RUNNER_TEMP/pull.log" 2>&1; echo $? > "$RUNNER_TEMP/pull.rc" ) &
+
+      - name: Check out PolyCI
+        if: matrix.mode != 'skip'
+        uses: actions/checkout@v7
+        with:
+          path: polyci
+
+      - name: Save this lab's plan
+        if: matrix.mode != 'skip'
+        env:
+          GROUP: ${{ toJSON(matrix) }}
+        run: printf '%s\n' "$GROUP" > group.json
+
+      - name: Download released images (${{ matrix.release_tag }})
+        if: matrix.mode == 'reuse'
+        run: python3 polyci/scripts/group.py fetch --group group.json --out out --repo "$GITHUB_REPOSITORY"
+
+      - name: Build every VM's image (baseline + overlay) and verify it
+        if: matrix.mode == 'build'
+        run: python3 polyci/scripts/group.py build --group group.json --out out --work work
+
+      - name: v86 settings
+        if: matrix.mode != 'skip'
+        id: v86
+        run: |
+          jq -r '"version=\(.v86.npm_version)\nbios_repo=\(.v86.bios_repo)\nbios_ref=\(.v86.bios_ref)"' \
+            polyci/polyci.json >> "$GITHUB_OUTPUT"
+
+      - name: Check out v86 BIOS files
+        if: matrix.mode != 'skip'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ steps.v86.outputs.bios_repo }}
+          ref: ${{ steps.v86.outputs.bios_ref }}
+          path: v86src
+          sparse-checkout: bios
+          sparse-checkout-cone-mode: false
+
+      - name: Assemble the multi-VM page
+        if: matrix.mode != 'skip'
+        env:
+          V86_VERSION: ${{ steps.v86.outputs.version }}
+          LABEL: ${{ matrix.release_tag }}
+        run: bash polyci/scripts/assemble-site.sh out v86src/bios site
+
+      - name: Cache the page test's browser driver
+        if: matrix.mode == 'build'
+        id: pt-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/polyci-page-test
+          key: puppeteer-core-24-${{ runner.os }}
+
+      - name: Install the page test's browser driver
+        if: matrix.mode == 'build' && steps.pt-cache.outputs.cache-hit != 'true'
+        run: npm install --prefix ~/.cache/polyci-page-test --silent --no-audit --no-fund puppeteer-core@24
+
+      - name: Boot test (QEMU, all VMs on one network) and page test (Chrome), in parallel
+        if: matrix.mode == 'build'
+        timeout-minutes: 40
+        run: |
+          while [ ! -f "$RUNNER_TEMP/pull.rc" ]; do sleep 1; done
+          [ "$(cat "$RUNNER_TEMP/pull.rc")" = 0 ] || { cat "$RUNNER_TEMP/pull.log"; echo "::error::could not pull $TOOLS_IMAGE"; exit 1; }
+          kvm=(); flag=
+          if [ -e /dev/kvm ]; then kvm=(--device /dev/kvm); flag=--kvm; fi
+          echo "KVM: ${flag:-not available, using emulation}"
+
+          docker run --rm "${kvm[@]}" -v "$PWD:/w" -w /w "$TOOLS_IMAGE" \
+            python3 polyci/scripts/boot-test-multi.py --images out --log-dir out $flag \
+            > out/boot-test.txt 2>&1 &
+          boot=$!
+
+          pt=~/.cache/polyci-page-test
+          cp polyci/scripts/page-test-multi.mjs "$pt/"
+          python3 -m http.server 8080 --directory site --bind 127.0.0.1 >/dev/null 2>&1 &
+          node "$pt/page-test-multi.mjs" http://127.0.0.1:8080/ out/page-shots > out/page-test.txt 2>&1 &
+          page=$!
+
+          b=0; wait "$boot" || b=$?
+          p=0; wait "$page" || p=$?
+          echo "::group::Boot test (exit $b)"; cat out/boot-test.txt; echo "::endgroup::"
+          echo "::group::Page test (exit $p)"; cat out/page-test.txt; echo "::endgroup::"
+          grep -h '^::error::' out/boot-test.txt out/page-test.txt || true
+          echo "boot test: $([ $b = 0 ] && echo passed || echo FAILED)   page test: $([ $p = 0 ] && echo passed || echo FAILED)"
+          [ "$b" = 0 ] && [ "$p" = 0 ]
+
+      - name: Upload test logs and screenshots
+        if: always() && matrix.mode == 'build'
+        uses: actions/upload-artifact@v7
+        with:
+          name: tests-${{ matrix.lab }}
+          path: |
+            out/boot-*.log
+            out/boot-test.txt
+            out/page-test.txt
+            out/page-shots/
+          if-no-files-found: ignore
+
+      - name: Release files
+        if: matrix.mode == 'build'
+        run: python3 polyci/scripts/group.py release --group group.json --out out --dist dist
+
+      - name: Upload images
+        if: matrix.mode == 'build'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.release_tag }}
+          path: dist/
+
+      - name: Upload site for the Pages deploy
+        if: matrix.mode != 'skip'
+        uses: actions/upload-artifact@v7
+        with:
+          name: site-${{ matrix.lab }}
+          path: site/
+          retention-days: 7
+
+      - name: Publish ${{ matrix.release_tag }}
+        if: matrix.mode == 'build' && needs.plan.outputs.publish == 'true'
+        run: |
+          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Rebuilt because PolyCI's pipeline changed. If every VM's images are
+            # byte-identical, just record the new fingerprint; never replace images.
+            gh release download "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" -p release.json -O old-release.json
+            same=$(python3 -c "
+          import json
+          o, n = json.load(open('old-release.json')), json.load(open('dist/release.json'))
+          keys = ('packaged_rootfs_sha256', 'lab_cpio_sha256')
+          print(all(o['vms'].get(v, {}).get(k) == n['vms'][v][k] for v in n['vms'] for k in keys))")
+            if [ "$same" = True ]; then
+              gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --clobber dist/release.json dist/SHA256SUMS
+              echo "$RELEASE_TAG: images unchanged; recorded the new pipeline fingerprint." | tee -a "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::$RELEASE_TAG already exists with different images. Left it unchanged; delete that release to let it be republished."
+            fi
+            exit 0
+          fi
+          python3 - <<'PY' > notes.md
+          import json
+          r = json.load(open("dist/release.json"))
+          print(f"**{r['title']}**: {len(r['vms'])} VMs on one page.\n")
+          print("| VM | Lab repo | Baseline | Page |")
+          print("|---|---|---|---|")
+          for name, v in r["vms"].items():
+              print(f"| `{name}` | {v['repo']} @ `{v['commit'][:12]}` | `{v['baseline']['tag']}` | "
+                    f"{'visible' if v['visible'] else 'hidden (Web Worker)'}, {v['memory_mb']} MB |")
+          print("\nEach VM: boot `<vm>.bzImage` with `<vm>.rootfs.cpio.gz` "
+                "(= baseline rootfs + `<vm>.lab.cpio.gz`), all on one Ethernet segment, "
+                "with the same `polylab_email_hex`/`polylab_date`/`polylab_code` on every kernel command line.")
+          PY
+          gh release create "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
+            --title "$TITLE (${RELEASE_TAG#"$LAB"-})" --notes-file notes.md dist/*
+          echo "Published **$RELEASE_TAG**" >> "$GITHUB_STEP_SUMMARY"
+
   # One required check for branch protection, however many labs there are.
   all-labs:
     name: all labs pass
-    needs: [plan, tools, lab]
+    needs: [plan, tools, lab, group]
     if: always()
     runs-on: ubuntu-24.04
     steps:
@@ -418,10 +609,11 @@ jobs:
           PLAN: ${{ needs.plan.result }}
           TOOLS: ${{ needs.tools.result }}
           LAB: ${{ needs.lab.result }}
+          GROUP: ${{ needs.group.result }}
         run: |
-          echo "plan: $PLAN  tools: $TOOLS  labs: $LAB"
+          echo "plan: $PLAN  tools: $TOOLS  labs: $LAB  multi-VM labs: $GROUP"
           [ "$PLAN" = success ] || exit 1
-          for r in "$TOOLS" "$LAB"; do [ "$r" = success ] || [ "$r" = skipped ] || exit 1; done
+          for r in "$TOOLS" "$LAB" "$GROUP"; do [ "$r" = success ] || [ "$r" = skipped ] || exit 1; done
 
   # After a passing baseline test with "promote": un-pre-release the tested
   # baselines and open (or refresh) a PR that pins them in polyci.json.
@@ -431,10 +623,10 @@ jobs:
   # PR by itself (close and reopen it, or add POLYCI_BOT_TOKEN).
   pin:
     name: Promote and pin tested baselines
-    needs: [plan, lab, all-labs]
+    needs: [plan, all-labs]
     if: >-
       always() && github.event_name == 'workflow_dispatch' && inputs.promote &&
-      needs.all-labs.result == 'success' && needs.lab.result == 'success' &&
+      needs.all-labs.result == 'success' &&
       needs.plan.outputs.overrides != '{}' && needs.plan.outputs.overrides != '' &&
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-24.04
@@ -488,8 +680,12 @@ jobs:
 
   pages:
     name: Deploy to GitHub Pages
-    needs: [plan, lab]
-    if: always() && needs.plan.outputs.publish == 'true' && needs.lab.result == 'success'
+    needs: [plan, lab, group]
+    if: >-
+      always() && needs.plan.outputs.publish == 'true' &&
+      (needs.lab.result == 'success' || needs.lab.result == 'skipped') &&
+      (needs.group.result == 'success' || needs.group.result == 'skipped') &&
+      (needs.lab.result == 'success' || needs.group.result == 'success')
     runs-on: ubuntu-24.04
     permissions:
       contents: read

@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PolyLab</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0d10'/%3E%3Ctext x='5' y='23' font-family='monospace' font-size='18' fill='%234fb3ff'%3E%3E_%3C/text%3E%3C/svg%3E">
+<style>
+  :root { --bg: #0b0d10; --panel: #14181d; --text: #d7dde4; --muted: #8b96a3; --accent: #4fb3ff; --ok: #5fd38d; --warn: #f2c14e; --bad: #ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid #222a33; background: var(--panel); }
+  h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: .2px; }
+  #status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #3a434e; display: inline-block; flex: none; }
+  .dot.busy { background: var(--warn); }
+  .dot.ok { background: var(--ok); }
+  .dot.bad { background: var(--bad); }
+  #vms { display: flex; gap: 12px; color: var(--muted); font-size: 13px; }
+  #vms span { display: inline-flex; align-items: center; gap: 6px; }
+  .spacer { flex: 1; }
+  button, a.button { font: inherit; font-size: 14px; color: var(--text); background: #1d232b; text-decoration: none;
+    border: 1px solid #2c3540; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  button:hover, a.button:hover { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  [hidden] { display: none !important; }
+  main { display: flex; flex-direction: column; align-items: center; padding: 20px; gap: 12px; }
+  #start { max-width: 520px; width: 100%; background: var(--panel); border: 1px solid #222a33;
+    border-radius: 10px; padding: 22px; margin-top: 24px; }
+  #start h2 { margin: 0 0 6px; font-size: 17px; }
+  #start p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+  #start label { display: block; font-size: 14px; margin-bottom: 6px; }
+  #start input { width: 100%; font: inherit; color: var(--text); background: #0f1317; border: 1px solid #2c3540;
+    border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; }
+  #start input:focus { outline: none; border-color: var(--accent); }
+  #start .row { display: flex; align-items: center; gap: 12px; }
+  #start .note { margin: 12px 0 0; font-size: 13px; }
+  #email-error { color: var(--bad); font-size: 13px; }
+  #screen_container { background: #000; padding: 6px; border-radius: 6px;
+    box-shadow: 0 0 0 1px #222a33, 0 10px 30px rgba(0,0,0,.45); outline: none; }
+  #screen_container:focus-within, #screen_container:focus { box-shadow: 0 0 0 2px var(--accent); }
+  #screen_container > div { white-space: pre; font: 15px/18px "DejaVu Sans Mono", Menlo, Consolas, monospace; color: #c0c0c0; }
+  #screen_container canvas { display: none; }
+  #help { max-width: 760px; color: var(--muted); font-size: 14px; text-align: center; }
+  #help code { color: var(--text); background: #1d232b; padding: 1px 5px; border-radius: 4px; }
+  footer { color: #5d6875; font-size: 12px; text-align: center; padding: 8px 0 20px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">PolyLab</h1>
+  <div id="status"><i class="dot"></i><span id="status-text">Waiting to start</span></div>
+  <div id="vms" aria-label="Virtual machines"></div>
+  <div class="spacer"></div>
+  <a id="form" class="button" href="#" target="_blank" rel="noopener" hidden>Submit answers</a>
+  <button id="ctrlc" title="Send Ctrl+C to the terminal" disabled>Ctrl+C</button>
+  <button id="restart" title="Start over with fresh machines (your progress is lost)">Restart</button>
+</header>
+<main>
+  <form id="start" autocomplete="on">
+    <h2>Start the lab</h2>
+    <p>This lab runs several virtual machines in your browser. Your answers depend on the email
+       you enter, so use your Penn State email.</p>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" required placeholder="abc123@psu.edu" autocomplete="email">
+    <div class="row">
+      <button id="go" type="submit">Start</button>
+      <span id="email-error" role="alert"></span>
+    </div>
+    <p class="note" id="exercise"></p>
+    <p class="note" id="cores" hidden>This computer reports fewer than four processor cores, so the lab may run slowly.</p>
+  </form>
+  <div id="screen_container" tabindex="0" hidden>
+    <div></div>
+    <canvas></canvas>
+  </div>
+  <p id="help" hidden>
+    Click the terminal and type. The other machines on the network run in the background; you only
+    work on this one. Everything runs in your browser; reloading the page starts over.
+  </p>
+</main>
+<footer>
+  Build <span id="build">dev</span> · runs on <a href="https://github.com/copy/v86">v86</a>
+</footer>
+
+<script src="v86/libv86.js"></script>
+<script>
+"use strict";
+// One visible VM on this page's thread (it owns the screen and keyboard) and
+// every hidden VM in its own Web Worker, so each gets its own CPU core. All of
+// them share one Ethernet segment: the page passes every frame a VM sends to
+// all the others (a hub). Nothing leaves the page and other tabs are not
+// connected, so two open copies of the lab cannot see each other.
+//
+// Every VM gets the same PolyLab identity on its kernel command line
+// (polylab_email_hex, polylab_date, polylab_code), which the lab's own scripts
+// read to derive addresses, stage values and flags.
+
+const BASE_CMDLINE = "console=ttyS0 nomodeset tsc=reliable mitigations=off random.trust_cpu=on";
+const STAGGER_MS = 4000;   // start hidden VMs one by one, after the visible VM
+
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, "0");
+const statusDot = $("status").querySelector(".dot");
+const setStatus = (text, kind) => { $("status-text").textContent = text; statusDot.className = "dot " + (kind || "busy"); };
+statusDot.className = "dot";
+
+// Exposed for the CI page test and for debugging in the browser console.
+const polylab = window.polylab = { state: {}, frames: {}, serial: {}, errors: [], cmdline: "" };
+
+fetch("build.json").then(r => r.ok ? r.json() : null).then(b => {
+  if (!b) return;
+  $("build").textContent = b.label;
+  if (b.title) { $("title").textContent = b.title; document.title = b.title; }
+  if (b.form_url) { $("form").href = b.form_url; $("form").hidden = false; }
+}).catch(() => {});
+
+// ---- identity ------------------------------------------------------------
+// The exercise date is today (local time) unless the link sets ?date=YYYY-MM-DD.
+const now = new Date();
+let date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+const asked = new URLSearchParams(location.search).get("date");
+if (asked && /^\d{4}-\d{2}-\d{2}$/.test(asked) && !isNaN(Date.parse(asked))) date = asked;
+const code = parseInt(date.replaceAll("-", ""), 10).toString(16).toUpperCase();
+$("exercise").textContent = `Exercise date ${date} (code ${code}).`;
+if ((navigator.hardwareConcurrency || 4) < 4) $("cores").hidden = false;
+
+try { $("email").value = localStorage.getItem("polylab-email") || ""; } catch (e) {}
+
+function identityCmdline(email) {
+  const hex = Array.from(new TextEncoder().encode(email), b => b.toString(16).padStart(2, "0")).join("");
+  return `${BASE_CMDLINE} polylab_email_hex=${hex} polylab_date=${date} polylab_code=${code}`;
+}
+
+// ---- the hub ---------------------------------------------------------------
+const ports = [];   // {name, send(frame)}
+function deliver(from, frame) {
+  polylab.frames[from] = (polylab.frames[from] || 0) + 1;
+  for (const p of ports) if (p.name !== from) p.send(frame);
+}
+
+// ---- VM status chips -------------------------------------------------------
+function chip(name) {
+  const s = document.createElement("span");
+  s.innerHTML = '<i class="dot"></i>';
+  s.append(name);
+  s.title = name + ": waiting";
+  $("vms").append(s);
+  return state => {
+    polylab.state[name] = state;
+    s.title = `${name}: ${state}`;
+    s.firstChild.className = "dot " + ({ running: "ok", error: "bad", waiting: "" }[state] ?? "busy");
+    const states = Object.values(polylab.state);
+    if (states.includes("error")) setStatus("A virtual machine failed to start (see the browser console)", "bad");
+  };
+}
+
+// ---- start -----------------------------------------------------------------
+$("start").addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const email = $("email").value.trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $("email-error").textContent = "Enter a valid email address."; return; }
+  $("email-error").textContent = "";
+  try { localStorage.setItem("polylab-email", email); } catch (e) {}
+  $("go").disabled = true;
+
+  let vms;
+  try {
+    vms = await (await fetch("images/vms.json")).json();
+  } catch (e) {
+    setStatus("Could not load the lab description (images/vms.json)", "bad");
+    return;
+  }
+  const cmdline = polylab.cmdline = identityCmdline(email);
+  $("start").hidden = true;
+  $("screen_container").hidden = false;
+  $("help").hidden = false;
+  setStatus("Downloading the virtual machines…");
+
+  const visible = vms.find(v => v.visible);
+  const hidden = vms.filter(v => !v.visible);
+  const chips = Object.fromEntries(vms.map(v => [v.name, chip(v.name)]));
+  for (const v of vms) chips[v.name]("waiting");
+
+  // The visible VM, on this thread.
+  const emulator = window.emulator = new V86({
+    wasm_path: "v86/v86.wasm",
+    memory_size: visible.memory_mb * 1024 * 1024,
+    vga_memory_size: 8 * 1024 * 1024,
+    screen_container: $("screen_container"),
+    bios: { url: "v86/seabios.bin" },
+    vga_bios: { url: "v86/vgabios.bin" },
+    bzimage: { url: "images/" + visible.bzimage },
+    initrd: { url: "images/" + visible.initrd },
+    cmdline,
+    autostart: true,
+  });
+  chips[visible.name]("downloading");
+  emulator.add_listener("download-progress", e => {
+    if (e.total) setStatus(`Downloading… ${Math.round(100 * e.loaded / e.total)}%`);
+  });
+  emulator.add_listener("net0-send", frame => deliver(visible.name, new Uint8Array(frame)));
+  ports.push({ name: visible.name, send: frame => emulator.bus.send("net0-receive", frame) });
+
+  // Hidden VMs start once the visible one is booting, one every few seconds,
+  // so their downloads and boots do not all compete at once.
+  emulator.add_listener("emulator-ready", () => {
+    chips[visible.name]("booting");
+    setStatus("Booting Linux…");
+    hidden.forEach((vm, i) => setTimeout(() => startHidden(vm, cmdline, chips[vm.name]), STAGGER_MS * (i + 1)));
+  });
+
+  // Log in as root when tty1 shows its login prompt (as the single-VM page does).
+  const rows = [];
+  let loggedIn = false;
+  emulator.add_listener("screen-put-char", ([row, col, chr]) => {
+    if (loggedIn) return;
+    const line = rows[row] || (rows[row] = []);
+    line[col] = String.fromCharCode(chr);
+    if (line.join("").includes("login:")) {
+      loggedIn = true;
+      chips[visible.name]("running");
+      setTimeout(() => {
+        emulator.keyboard_send_text("root\n");
+        setStatus("Ready — click the terminal and type", "ok");
+        $("ctrlc").disabled = false;
+        $("screen_container").focus();
+      }, 300);
+    }
+  });
+
+  $("ctrlc").onclick = () => {
+    emulator.keyboard_send_scancodes([0x1D, 0x2E, 0xAE, 0x9D]);   // Ctrl down, C, C up, Ctrl up
+    $("screen_container").focus();
+  };
+});
+
+function startHidden(vm, cmdline, setState) {
+  const worker = new Worker("vm-worker.js");
+  polylab.serial[vm.name] = [];
+  worker.onmessage = ({ data }) => {
+    if (data.type === "net") deliver(vm.name, data.frame);
+    else if (data.type === "state") setState(data.state);
+    else if (data.type === "serial") {
+      const log = polylab.serial[vm.name];
+      log.push(data.line);
+      if (log.length > 400) log.shift();
+    } else if (data.type === "error") {
+      polylab.errors.push(`${vm.name}: ${data.message}`);
+      console.error(`${vm.name}:`, data.message);
+      setState("error");
+    }
+  };
+  worker.onerror = e => {
+    polylab.errors.push(`${vm.name}: ${e.message}`);
+    setState("error");
+  };
+  // Frames to a worker are copied by postMessage (each VM gets its own copy).
+  ports.push({ name: vm.name, send: frame => worker.postMessage({ type: "net", frame }) });
+  worker.postMessage({ type: "start", vm, cmdline });
+}
+
+$("restart").onclick = () => location.reload();
+</script>
+</body>
+</html>

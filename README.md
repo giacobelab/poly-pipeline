@@ -56,6 +56,43 @@ e.g. `polybandit3.1-0c95f01-3f9a1c2b7d-release`, with:
 
 A new release appears only when a lab commit or its baseline changes.
 
+## Multi-VM labs (netsec-snort)
+
+Some labs are several VMs that work together on one page. The Snort lab has
+a **defender** the student uses, plus an **attacker** and a **noise** VM that
+generate traffic in the background. They need:
+
+- **Two baselines**: `snort-defender` for the defender and `snort-attacker`
+  for the other two. Their config sets come from `giacobe/netsec-snort`
+  (`from_lab.config_dir`: PolyCI copies the folder into the builder).
+- **Overlays at `/`**: each VM repo's `rootfs-overlay/` is placed at the image
+  root, with modes and owners from its `permissions.txt` (setuid included) and
+  every file checked against its `SHA256SUMS`.
+- **One network**: the defender is 10.0.0.10; the others pick addresses from
+  the student's identity and send traffic to it.
+- **One identity**: every VM gets the same `polylab_email_hex`, `polylab_date`
+  and `polylab_code` on its kernel command line.
+
+**The page** (`web/multi.html`) asks for the email once and starts the
+defender on the page, with the screen and keyboard. Each hidden VM runs in its
+own Web Worker (`web/vm-worker.js`), so it gets its own CPU core, and starts a
+few seconds after the one before it. The page passes every Ethernet frame a VM
+sends to all the others, like a hub. Nothing leaves the page, and other tabs
+are not connected. The exercise date is today, unless the link sets
+`?date=YYYY-MM-DD` (e.g. for a whole class).
+
+**The tests**: `boot-test-multi.py` boots all the VMs in QEMU on one network
+(joined by a small hub in the script). It checks that each VM logs in and
+shows its memory, that frames flow from every VM, and that the defender has
+its address, sees at least two other hosts, and got the email. With tcpdump
+in the image, it also checks the defender captures packets from at least
+three other addresses. `page-test-multi.mjs` does the same in Chrome through
+the real page.
+
+**The release**, `<lab>-<7 hex of the VM commits>-<10 hex of the baseline
+tags>-release`, has `<vm>.bzImage`, `<vm>.rootfs.cpio.gz`, `<vm>.lab.cpio.gz`
+and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
+
 ## `polyci.json`
 
 ```jsonc
@@ -93,6 +130,14 @@ A new release appears only when a lab commit or its baseline changes.
   rootfs.
 - `baselines.<type>.release` pins the promoted baseline release labs use.
   Blank: labs of that type are skipped (reported, not failed).
+- `labs.<id>.vms` makes a multi-VM lab (see above): one entry per VM, with
+  `repo`, `ref`, `baseline`, `memory_mb` (128–1024), and `"visible": true` on
+  exactly one. `overlay` sets the folder (`subdir`), where it goes (`dest`),
+  and the repo's `permissions` and `checksums` files. The weekly update PR
+  moves each VM's `ref` on its own.
+- `baselines.<type>.from_lab` takes either `install_script` (run the lab's
+  installer into the builder) or `config_dir` (copy that folder in as the
+  config set).
 - `labs.<id>.subdir` is the folder that becomes `/root`; `rename` renames files
   inside it (e.g. `installbandit.sh` → `install.sh`).
 - `labs.<id>.boot_test`: `v31` checks PolyBandit 3.1 answers and screens
@@ -176,6 +221,11 @@ pull requests**.
 **A new lab:** add an entry to `labs`. Use `"boot_test": "generic"` unless it
 needs exact answer checks.
 
+**The Snort lab, first time:** run **Publish baseline** for `snort-defender`
+and for `snort-attacker`. Then run **Build labs** with labs `netsec-snort`,
+baseline_override `baseline-snort-defender-<hash>,baseline-snort-attacker-<hash>`
+and **promote** ticked. Merge the pin PR it opens.
+
 ## Pages
 
 Every publishing run deploys `https://ruffm.github.io/PolyCI/` with a
@@ -191,7 +241,9 @@ cat rootfs.cpio.gz lab.cpio.gz > packaged.rootfs.cpio.gz
 python3 scripts/boot-test.py --flavor v31 --kernel bzImage --initrd packaged.rootfs.cpio.gz
 ```
 
-The boot test needs `qemu-system-i386` and `python3-pexpect`.
+The boot test needs `qemu-system-i386` and `python3-pexpect`. For a multi-VM
+lab, `scripts/group.py build` makes the images (it needs `gh`), and
+`scripts/boot-test-multi.py --images out` tests them.
 
 ## Contributing, security and license
 
