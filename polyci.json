@@ -42,7 +42,7 @@
         "ref": "4c18643c9138d0b23c82aebcb3371e7c0f61a218",
         "config_dir": "buildroot/config-sets/snort-defender"
       },
-      "release": ""
+      "release": "baseline-snort-defender-549a3bd528"
     },
     "snort-attacker": {
       "description": "Snort, nmap/nping, tcpdump, Python 3: the attacker and noise VMs in the Snort lab (config set from netsec-snort)",
@@ -52,7 +52,7 @@
         "ref": "4c18643c9138d0b23c82aebcb3371e7c0f61a218",
         "config_dir": "buildroot/config-sets/snort-attacker"
       },
-      "release": ""
+      "release": "baseline-snort-attacker-8ea81cc67e"
     }
   },
   "labs": {
