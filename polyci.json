@@ -14,12 +14,12 @@
     "basic": {
       "description": "Basic shell commands (builder config set 'basic')",
       "config_set": "basic",
-      "release": "baseline-basic-c6c454a5fc"
+      "release": "baseline-basic-dd9d163396"
     },
     "filesystem": {
       "description": "Files, text tools and compression (builder config set 'basic-compression')",
       "config_set": "basic-compression",
-      "release": "baseline-filesystem-9e0bd73aa9"
+      "release": "baseline-filesystem-cbf3e4f8f2"
     },
     "networking": {
       "description": "Network namespaces, veth, netem, dnsmasq, traceroute, curl, sudo (from polylinux-networking)",
@@ -29,17 +29,17 @@
         "ref": "4262596e92f53e3c9ffec07415ebe45a7e5dd9b0",
         "install_script": "install-builder-config.sh"
       },
-      "release": "baseline-networking-fc3d6448a7"
+      "release": "baseline-networking-e206609908"
     },
     "snort-defender": {
       "description": "Snort IDS, tcpdump, Python 3: the defender in the Snort lab",
       "config_set": "snort-defender",
-      "release": "baseline-snort-defender-549a3bd528"
+      "release": "baseline-snort-defender-12170b0881"
     },
     "snort-attacker": {
       "description": "Snort, nmap/nping, tcpdump, Python 3: the attacker and noise VMs in the Snort lab",
       "config_set": "snort-attacker",
-      "release": "baseline-snort-attacker-8ea81cc67e"
+      "release": "baseline-snort-attacker-ea09a770af"
     }
   },
   "labs": {
