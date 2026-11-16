@@ -27,7 +27,7 @@ help keep it a place people are glad to learn and contribute in.
 The maintainer may edit or remove comments, close or lock threads, and block
 people who do not follow this code, in proportion to what happened.
 
-To report a problem privately, email **[CONTACT EMAIL]**. Reports are read
+To report a problem privately, email mruff[at]psu[.]edu. Reports are read
 only by the maintainer and kept confidential.
 
 This code applies in all PolyCI project spaces and when someone represents the
