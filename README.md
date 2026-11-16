@@ -3,7 +3,7 @@
 Build, test and release pipeline for PolyLinux labs. PolyCI holds no lab code:
 it checks each lab repo out at a pinned commit, packages it onto a tested
 Buildroot baseline, tests the result, and publishes it as a release and a
-playable browser page.
+[playable browser page](https://ruffm.github.io/PolyCI/).
 
 ```
  polyci.json ──► baseline.yml ──► baseline-<type>-<hash>          (kernel + base rootfs)
@@ -81,7 +81,7 @@ A new release appears only when a lab commit or its baseline changes.
 
 - `baselines.<type>.config_set` is a builder config set, or one a lab repo
   provides (`from_lab`: PolyCI runs that repo's install script into the
-  builder, as Nick's instructions say).
+  builder, as Nick Giacobe's instructions say).
 - `baselines.<type>.extra_config`: extra `BR2_...` lines added to the end of
   the config set's `features.fragment` before the build (and so into the tag
   hash). The basic set needs `BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y`; without it
@@ -159,7 +159,7 @@ The page test uses the runner's Chrome with a cached `puppeteer-core`.
 **A lab changed upstream:** every Monday, **Propose lab updates** opens (or
 refreshes) one PR moving each changed lab's `ref` to its newest commit, with
 compare links. The PR runs the full pipeline; merging publishes the new
-releases. You can also run it by hand, or edit a `ref` yourself.
+releases. Can also run it by hand.
 
 Pull requests opened with the built-in token don't start other workflows. To
 have CI run on these PRs automatically, add a repository secret
@@ -176,7 +176,7 @@ needs exact answer checks.
 
 ## Pages
 
-Every publishing run deploys `https://<you>.github.io/PolyCI/` with a
+Every publishing run deploys `https://ruffm.github.io/PolyCI/` with a
 landing page and one playable page per lab (`/<lab-id>/`). One-time setup:
 **Settings → Pages → Source: GitHub Actions**.
 
