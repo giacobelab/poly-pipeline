@@ -7,8 +7,11 @@
 
 1. packaged == base bytes followed by lab bytes (the base is untouched)
 2. after unpacking both archives in order (as the kernel does), every file in
-   the lab manifest is in /root with the same mode and SHA-256
-3. every required command exists in bin, sbin, usr/bin or usr/sbin
+   the lab manifest is there with the same mode and SHA-256, and every
+   directory with the same mode
+3. no lab directory lands where the base has a file or symlink (the kernel
+   would delete it: e.g. a base whose /bin is a symlink to usr/bin)
+4. every required command exists in bin, sbin, usr/bin or usr/sbin
 """
 import argparse, gzip, hashlib, stat, sys
 
@@ -54,21 +57,30 @@ def main():
     if packaged != base + lab:
         err("packaged rootfs is not exactly the baseline rootfs followed by lab.cpio.gz")
     view = unpack(packaged)
+    base_view, lab_view = unpack(base), unpack(lab)
+    for name, (mode, _) in lab_view.items():
+        if stat.S_ISDIR(mode) and name in base_view and not stat.S_ISDIR(base_view[name][0]):
+            err(f"the lab makes /{name} a directory, but in the baseline it is a "
+                f"{'symlink' if stat.S_ISLNK(base_view[name][0]) else 'file'}: the kernel would remove it")
 
     checked = 0
     for line in open(a.manifest):
-        mode_s, path, digest = line.rstrip("\n").rsplit(" ", 2)
-        name = path.lstrip("/")
+        # "mode path sha256": the path may contain spaces
+        mode_s, rest = line.rstrip("\n").split(" ", 1)
+        path, digest = rest.rsplit(" ", 1)
+        name = path.strip("/")
         if name not in view:
             err(f"missing {path}")
             continue
         mode, body = view[name]
         if stat.filemode(mode) != mode_s:
             err(f"{path} has mode {stat.filemode(mode)}, expected {mode_s}")
+        if digest == "-":  # a directory
+            continue
         if hashlib.sha256(body).hexdigest() != digest:
             err(f"{path} content differs from the lab commit")
         checked += 1
-    if "root" in view and stat.filemode(view["root"][0]) != "drwxr-xr-x":
+    if "root" in lab_view and stat.filemode(view["root"][0]) != "drwxr-xr-x":
         err(f"/root has mode {stat.filemode(view['root'][0])}, expected drwxr-xr-x")
 
     commands = list(a.command)

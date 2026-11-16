@@ -17,7 +17,7 @@ on:
       type:
         description: Baseline type (from polyci.json)
         type: choice
-        options: [basic, filesystem, networking, netsec]
+        options: [basic, filesystem, networking, snort-defender, snort-attacker]
 
 # Read-only by default; only the publish job can write (create the release).
 permissions:
@@ -59,6 +59,11 @@ jobs:
           if b.get("enabled", True) is False or not b.get("config_set"):
               sys.exit(f"::error::baseline type {t!r} is disabled or has no config_set in polyci.json")
           lab = b.get("from_lab") or {}
+          if lab and bool(lab.get("install_script")) == bool(lab.get("config_dir")):
+              sys.exit(f"::error::baselines.{t}.from_lab needs exactly one of install_script or config_dir")
+          cd = lab.get("config_dir", "")
+          if cd and (cd.startswith("/") or ".." in cd.split("/")):
+              sys.exit(f"::error::baselines.{t}.from_lab.config_dir must be a path inside the repo")
           extra = b.get("extra_config") or []
           bad = [x for x in extra if not x.startswith("BR2_") or "=" not in x or "\n" in x]
           if bad:
@@ -73,6 +78,7 @@ jobs:
               "lab_repo": lab.get("repo", ""),
               "lab_ref": lab.get("ref", ""),
               "lab_install": lab.get("install_script", ""),
+              "lab_config_dir": lab.get("config_dir", ""),
           }
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               for k, v in out.items():
@@ -99,7 +105,20 @@ jobs:
         if: steps.cfg.outputs.lab_repo != ''
         env:
           INSTALL: ${{ steps.cfg.outputs.lab_install }}
-        run: sh "lab/$INSTALL" "$GITHUB_WORKSPACE/builder"
+          CONFIG_DIR: ${{ steps.cfg.outputs.lab_config_dir }}
+          CONFIG_SET: ${{ steps.cfg.outputs.config_set }}
+        run: |
+          if [ -n "$INSTALL" ]; then
+            sh "lab/$INSTALL" "$GITHUB_WORKSPACE/builder"
+          else
+            # config_dir: copy the folder in as builder/config-sets/<config_set>,
+            # as the lab's README says (its defconfig points at
+            # ../../../config-sets/<config_set>/linux.config).
+            [ -f "lab/$CONFIG_DIR/defconfig" ] || { echo "::error::lab/$CONFIG_DIR/defconfig not found"; exit 1; }
+            rm -rf "builder/config-sets/$CONFIG_SET"
+            cp -a "lab/$CONFIG_DIR" "builder/config-sets/$CONFIG_SET"
+            ls -l "builder/config-sets/$CONFIG_SET"
+          fi
 
       - name: Adjust the config set (drop host QEMU, add extra_config)
         env:
@@ -200,7 +219,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends qemu-system-x86 python3-pexpect
           python3 - <<'PY'
           import pexpect, sys
-          vm = pexpect.spawn("qemu-system-i386 -m 256M -nographic -no-reboot "
+          vm = pexpect.spawn("qemu-system-i386 -m 512M -nographic -no-reboot "
                              "-kernel baseline/images/bzImage -initrd baseline/images/rootfs.cpio.gz "
                              "-append 'console=ttyS0 panic=-1'", encoding="utf-8",
                              codec_errors="replace", timeout=300)

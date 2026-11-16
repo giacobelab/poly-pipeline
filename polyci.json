@@ -14,7 +14,9 @@
     "basic": {
       "description": "Basic shell commands (builder config set 'basic')",
       "config_set": "basic",
-      "extra_config": ["BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y"],
+      "extra_config": [
+        "BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y"
+      ],
       "release": "baseline-basic-c6c454a5fc"
     },
     "filesystem": {
@@ -32,10 +34,24 @@
       },
       "release": "baseline-networking-fc3d6448a7"
     },
-    "netsec": {
-      "description": "Network security (not defined yet)",
-      "config_set": "",
-      "enabled": false,
+    "snort-defender": {
+      "description": "Snort IDS, tcpdump, Python 3: the defender in the Snort lab (config set from netsec-snort)",
+      "config_set": "snort-defender",
+      "from_lab": {
+        "repo": "giacobe/netsec-snort",
+        "ref": "4c18643c9138d0b23c82aebcb3371e7c0f61a218",
+        "config_dir": "buildroot/config-sets/snort-defender"
+      },
+      "release": ""
+    },
+    "snort-attacker": {
+      "description": "Snort, nmap/nping, tcpdump, Python 3: the attacker and noise VMs in the Snort lab (config set from netsec-snort)",
+      "config_set": "snort-attacker",
+      "from_lab": {
+        "repo": "giacobe/netsec-snort",
+        "ref": "4c18643c9138d0b23c82aebcb3371e7c0f61a218",
+        "config_dir": "buildroot/config-sets/snort-attacker"
+      },
       "release": ""
     }
   },
@@ -66,6 +82,39 @@
       "boot_test": "generic",
       "users": "level{n}",
       "levels": 10
+    },
+    "netsec-snort": {
+      "title": "Snort Incident Response",
+      "page": "multi-vm",
+      "boot_test": "netsec-snort",
+      "identity": "polylab",
+      "overlay": {
+        "subdir": "rootfs-overlay",
+        "dest": "/",
+        "permissions": "permissions.txt",
+        "checksums": "SHA256SUMS"
+      },
+      "vms": {
+        "defender": {
+          "repo": "giacobe/netsec-snort-defender",
+          "ref": "c4eabee8848aad79a7c093b7b9e5db1d2b3e4a91",
+          "baseline": "snort-defender",
+          "visible": true,
+          "memory_mb": 256
+        },
+        "attacker": {
+          "repo": "giacobe/netsec-snort-attacker",
+          "ref": "f0c8e4652e02debe15eb23a753f26d8c6baec163",
+          "baseline": "snort-attacker",
+          "memory_mb": 192
+        },
+        "noise": {
+          "repo": "giacobe/netsec-snort-noise",
+          "ref": "fcaff4b79adcf677ea8d6a10754ada01a58cc491",
+          "baseline": "snort-attacker",
+          "memory_mb": 192
+        }
+      }
     }
   }
 }

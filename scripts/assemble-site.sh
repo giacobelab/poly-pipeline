@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Assemble one lab's v86 web page.
 # Usage: assemble-site.sh <image-dir> <v86-bios-dir> <out-dir>
-#   <image-dir>     holds packaged.bzImage and packaged.rootfs.cpio.gz
+#   <image-dir>     holds packaged.bzImage and packaged.rootfs.cpio.gz, or, for a
+#                   multi-VM lab, vms.json plus <vm>.bzImage and
+#                   <vm>.rootfs.cpio.gz for each VM it lists (scripts/group.py)
 #   <v86-bios-dir>  bios/ folder of a copy/v86 checkout (seabios.bin, vgabios.bin)
 # Environment:
 #   V86_VERSION     npm version of v86 (libv86.js + v86.wasm)
@@ -19,8 +21,18 @@ OUT=${3:?output dir}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 
 mkdir -p "$OUT/v86" "$OUT/images"
-cp "$HERE/web/index.html" "$OUT/index.html"
-cp "$IMAGES/packaged.bzImage" "$IMAGES/packaged.rootfs.cpio.gz" "$OUT/images/"
+if [ -f "$IMAGES/vms.json" ]; then
+  # Multi-VM page: the visible VM on the page, each hidden VM in a Web Worker.
+  cp "$HERE/web/multi.html" "$OUT/index.html"
+  cp "$HERE/web/vm-worker.js" "$OUT/"
+  cp "$IMAGES/vms.json" "$OUT/images/"
+  for f in $(python3 -c 'import json,sys; [print(v["bzimage"], v["initrd"]) for v in json.load(open(sys.argv[1]))]' "$IMAGES/vms.json"); do
+    cp "$IMAGES/$f" "$OUT/images/"
+  done
+else
+  cp "$HERE/web/index.html" "$OUT/index.html"
+  cp "$IMAGES/packaged.bzImage" "$IMAGES/packaged.rootfs.cpio.gz" "$OUT/images/"
+fi
 
 tmp=$(mktemp -d)
 trap 'rm -r -- "$tmp"' EXIT
