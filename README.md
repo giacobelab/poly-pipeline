@@ -133,7 +133,7 @@ labs rebuild and retest. Packaging is reproducible, so if the rebuilt images
 are byte-identical, the existing release just gets the new fingerprint; a
 release's images are never replaced.
 
-The QEMU boot test runs in a prepared image, `ghcr.io/<owner>/polyci-qemu`,
+The QEMU boot test runs in a prepared image, `ghcr.io/ruffm/polyci-qemu`,
 built from `tools/Dockerfile` by the `tools` job only when that file changes.
 The page test uses the runner's Chrome with a cached `puppeteer-core`.
 
