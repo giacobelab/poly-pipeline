@@ -170,6 +170,7 @@ and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
 | **Publish baseline** (`baseline.yml`) | by hand, per type | Build, smoke-boot, publish `baseline-<type>-<hash>` as a pre-release |
 | **Build labs** (`labs.yml`) | push, PR, weekly, by hand | Per lab: overlay, join, test; on `main`: releases + Pages |
 | **Propose lab updates** (`update-labs.yml`) | weekly, by hand | PR moving lab refs to their repos' newest commits |
+| **Clean up releases** (`cleanup.yml`) | by hand; monthly report | Delete old baseline and unused releases |
 
 The required check for branch protection is **`all labs pass`**: one check,
 however many labs there are.
@@ -233,6 +234,15 @@ pull requests**.
 
 **A new lab:** add an entry to `labs`. Use `"boot_test": "generic"` unless it
 needs exact answer checks.
+
+**Old releases:** **Clean up releases** → Run workflow. Left unticked,
+**delete** only lists what it would delete (see the run's summary); tick it
+to delete those releases and their tags. Pinned baselines and every lab's
+current release are always kept, plus the newest `keep_previous` older ones
+per baseline type and per lab (for rollback) and anything younger than
+`min_age_days`. Releases of labs or baseline types no longer in `polyci.json`
+go. Tags that do not look like PolyCI releases are never touched. A monthly
+run posts the same report without deleting anything.
 
 **The Snort lab, first time:** run **Publish baseline** for `snort-defender`
 and for `snort-attacker`. Then run **Build labs** with labs `netsec-snort`,
