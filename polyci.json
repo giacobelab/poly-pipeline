@@ -1,8 +1,8 @@
 {
   "_comment": "Everything PolyCI builds, pinned. Change a ref or a baseline release here, in a pull request; CI does the rest. Level users and counts come from each lab's lab.json; set 'users'/'levels' on a lab only if it has no lab.json (or to override it). See README.md.",
   "builder": {
-    "repo": "giacobe/buildroot-builder2",
-    "ref": "b6fb25fcadbd536a64ca7116f1c12e6daa7b5fd8",
+    "repo": "ruffm/buildroot-builder2",
+    "ref": "3b2afe0fba7968a91ccf258486627485f1fd52ff",
     "buildroot_version": "2025.02.15"
   },
   "v86": {
@@ -14,9 +14,6 @@
     "basic": {
       "description": "Basic shell commands (builder config set 'basic')",
       "config_set": "basic",
-      "extra_config": [
-        "BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y"
-      ],
       "release": "baseline-basic-c6c454a5fc"
     },
     "filesystem": {
@@ -35,23 +32,13 @@
       "release": "baseline-networking-fc3d6448a7"
     },
     "snort-defender": {
-      "description": "Snort IDS, tcpdump, Python 3: the defender in the Snort lab (config set from netsec-snort)",
+      "description": "Snort IDS, tcpdump, Python 3: the defender in the Snort lab",
       "config_set": "snort-defender",
-      "from_lab": {
-        "repo": "giacobe/netsec-snort",
-        "ref": "4c18643c9138d0b23c82aebcb3371e7c0f61a218",
-        "config_dir": "buildroot/config-sets/snort-defender"
-      },
       "release": "baseline-snort-defender-549a3bd528"
     },
     "snort-attacker": {
-      "description": "Snort, nmap/nping, tcpdump, Python 3: the attacker and noise VMs in the Snort lab (config set from netsec-snort)",
+      "description": "Snort, nmap/nping, tcpdump, Python 3: the attacker and noise VMs in the Snort lab",
       "config_set": "snort-attacker",
-      "from_lab": {
-        "repo": "giacobe/netsec-snort",
-        "ref": "4c18643c9138d0b23c82aebcb3371e7c0f61a218",
-        "config_dir": "buildroot/config-sets/snort-attacker"
-      },
       "release": "baseline-snort-attacker-8ea81cc67e"
     }
   },

@@ -20,10 +20,11 @@ Buildroot baseline, tests the result, and publishes it as a release and a
 ## How it fits together
 
 **Baselines** are Buildroot builds of a kernel and base rootfs with no lab in
-them, one per *type* (`basic`, `filesystem`, `networking`, `netsec`, ...). Each
-is published once as a release tagged `baseline-<type>-<hash>`, where the hash
-covers the Buildroot version, the whole config set and the builder's build
-script. Rebuilding with the same inputs gives the same tag; changing anything
+them, one per *type* (`basic`, `filesystem`, `networking`, `snort-defender`,
+...). Each is published once as a release tagged `baseline-<type>-<hash>`,
+where the hash covers the Buildroot version, the whole config set, the
+builder's shared `config-common/` files and its build script. Only file
+contents count, not which repo they came from. Rebuilding with the same inputs gives the same tag; changing anything
 gives a new one.
 
 **Labs** are pinned to a commit in
@@ -63,8 +64,8 @@ a **defender** the student uses, plus an **attacker** and a **noise** VM that
 generate traffic in the background. They need:
 
 - **Two baselines**: `snort-defender` for the defender and `snort-attacker`
-  for the other two. Their config sets come from `giacobe/netsec-snort`
-  (`from_lab.config_dir`: PolyCI copies the folder into the builder).
+  for the other two, from the builder's `snort-defender` and `snort-attacker`
+  config sets.
 - **Overlays at `/`**: each VM repo's `rootfs-overlay/` is placed at the image
   root, with modes and owners from its `permissions.txt` (setuid included) and
   every file checked against its `SHA256SUMS`.
@@ -99,10 +100,10 @@ and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
 
 ```jsonc
 {
-  "builder":   { "repo": "giacobe/buildroot-builder2", "ref": "<sha>", "buildroot_version": "2025.02.15" },
+  "builder":   { "repo": "ruffm/buildroot-builder2", "ref": "<sha>", "buildroot_version": "2025.02.15" },
   "v86":       { "npm_version": "0.5.473", "bios_repo": "copy/v86", "bios_ref": "<sha>" },
   "baselines": {
-    "basic":      { "config_set": "basic", "extra_config": ["BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y"], "release": "" },
+    "basic":      { "config_set": "basic", "release": "" },
     "filesystem": { "config_set": "basic-compression", "release": "baseline-filesystem-<hash>" },
     "networking": { "config_set": "networking-prototype-v1",
                     "from_lab": { "repo": "giacobe/polylinux-networking", "ref": "<sha>",
@@ -118,14 +119,19 @@ and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
 }
 ```
 
+- `builder` is the buildroot-builder2 to build baselines with. It points at
+  the fork `ruffm/buildroot-builder2` (branch `polyci`) while its changes are
+  pull requests to `giacobe/buildroot-builder2`: the basic set's BusyBox fix,
+  no host QEMU, dropped-option and command checks, the Snort config sets and
+  rootfs-overlay packaging, and shared `config-common/` settings. Once Nick
+  merges them, point `repo` and `ref` back at his repository. If the merged
+  files are the same, the baseline tags stay the same.
 - `baselines.<type>.config_set` is a builder config set, or one a lab repo
   provides (`from_lab`: PolyCI runs that repo's install script into the
   builder, as Nick Giacobe's instructions say).
 - `baselines.<type>.extra_config`: extra `BR2_...` lines added to the end of
   the config set's `features.fragment` before the build (and so into the tag
-  hash). The basic set needs `BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y`; without it
-  Buildroot quietly drops bash, coreutils, findutils, gawk, grep and sed. Drop
-  the entry once the builder's config set has the fix.
+  hash), for a fix the builder does not have yet.
 - Every baseline build runs `scripts/check-baseline.py` before publishing: each
   `BR2_...=y` the config set asks for must still be set after Buildroot's
   `olddefconfig`, and each command in `required-commands.txt` must be in the
