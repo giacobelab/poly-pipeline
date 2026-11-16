@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/ruffm/PolyCI/security/advisories/new
+    about: Please report security problems privately, not as an issue.
+  - name: A problem inside a lab (levels, text, helpers)
+    url: https://github.com/giacobe?tab=repositories
+    about: Lab content lives in the lab's own repository; open the issue there.

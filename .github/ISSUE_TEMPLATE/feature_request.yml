@@ -1,0 +1,32 @@
+name: New lab, baseline or feature
+description: Add a lab or baseline type to the pipeline, or improve how it builds, tests or publishes.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is it?
+      options:
+        - Add a lab
+        - Add or change a baseline type
+        - Pipeline improvement
+        - Web page improvement
+        - Documentation
+    validations:
+      required: true
+  - type: input
+    id: repo
+    attributes:
+      label: Lab or config repository (if any)
+      placeholder: giacobe/polylinux-...
+  - type: textarea
+    id: what
+    attributes:
+      label: What should PolyCI do?
+      description: For a new lab, say which baseline it needs, and whether it has a lab.json and a self-test.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why is it needed?

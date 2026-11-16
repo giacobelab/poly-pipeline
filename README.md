@@ -190,3 +190,11 @@ python3 scripts/boot-test.py --flavor v31 --kernel bzImage --initrd packaged.roo
 ```
 
 The boot test needs `qemu-system-i386` and `python3-pexpect`.
+
+## Contributing, security and license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md)
+and [SECURITY.md](SECURITY.md). PolyCI's own files are under the
+[MIT License](LICENSE). The labs belong to their authors (PolyBandit and the
+PolyLinux labs are by Nick Giacobe) and keep their own licenses; the images
+contain Buildroot packages under their own licenses.

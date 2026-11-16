@@ -1,0 +1,49 @@
+name: Bug report
+description: A workflow run failed, a release is wrong, or a published lab page does not work.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Please do not include lab solutions or level passwords.
+        Problems with a lab's own content belong in that lab's repository.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where is the problem?
+      options:
+        - Publish baseline (baseline.yml)
+        - Build labs (labs.yml)
+        - Propose lab updates (update-labs.yml)
+        - A published release
+        - A browser (GitHub Pages) lab page
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: lab
+    attributes:
+      label: Lab or baseline
+      description: For example polybandit3.1, or baseline-networking-fc3d6448a7.
+  - type: input
+    id: run
+    attributes:
+      label: Link to the run, release or page
+      placeholder: "https://github.com/ruffm/PolyCI/actions/runs/..."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: First error from the log
+      description: "Paste the first ::error:: line and a few lines before it."
+      render: text
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS (page problems only)
+      placeholder: Chrome 131 on Windows 11
