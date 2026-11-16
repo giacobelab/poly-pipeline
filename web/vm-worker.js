@@ -44,6 +44,9 @@ self.onmessage = ({ data }) => {
     });
     emulator.add_listener("serial0-output-byte", byte => {
       if (byte === 10) {
+        if (line.includes("Initramfs unpacking failed")) {
+          postMessage({ type: "error", message: `the image does not fit in ${vm.memory_mb} MB (${line.trim()})` });
+        }
         postMessage({ type: "serial", line });
         line = "";
       } else if (byte !== 13) {
