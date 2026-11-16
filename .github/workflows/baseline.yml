@@ -50,7 +50,7 @@ jobs:
           TYPE: ${{ inputs.type }}
         run: |
           python3 - <<'PY'
-          import json, os, sys
+          import json, os, re, sys
           cfg = json.load(open("polyci/polyci.json"))
           t = os.environ["TYPE"]
           b = cfg["baselines"].get(t)
@@ -70,6 +70,12 @@ jobs:
               sys.exit(f"::error::extra_config entries must look like BR2_FOO=y: {bad}")
           with open("polyci-extra.config", "w") as fh:
               fh.writelines(x + "\n" for x in extra)
+          drop = b.get("drop_config") or []
+          bad = [x for x in drop if not re.fullmatch(r"BR2_[A-Z0-9_]+", x)]
+          if bad:
+              sys.exit(f"::error::drop_config entries must be option names like BR2_FOO: {bad}")
+          with open("polyci-drop.config", "w") as fh:
+              fh.writelines(x + "\n" for x in drop)
           out = {
               "config_set": b["config_set"],
               "builder_repo": cfg["builder"]["repo"],
@@ -120,7 +126,7 @@ jobs:
             ls -l "builder/config-sets/$CONFIG_SET"
           fi
 
-      - name: Adjust the config set (drop host QEMU, add extra_config)
+      - name: Adjust the config set (drop host QEMU and drop_config, add extra_config)
         env:
           CONFIG_SET: ${{ steps.cfg.outputs.config_set }}
         run: |
@@ -130,6 +136,15 @@ jobs:
             [ -f "$f" ] && sed -i '/^BR2_PACKAGE_HOST_QEMU/d' "$f"
           done
           ! grep -h '^BR2_PACKAGE_HOST_QEMU' "$dir"/*
+          # drop_config from polyci.json: remove these options' lines (set or
+          # "is not set") from the set's defconfig and fragments.
+          while read -r opt; do
+            [ -n "$opt" ] || continue
+            for f in "$dir"/defconfig "$dir"/*.fragment; do
+              [ -f "$f" ] && sed -i -E "/^(# )?${opt}(=| is not set)/d" "$f"
+            done
+            echo "Removed $opt"
+          done < polyci-drop.config
           # extra_config from polyci.json goes at the end of features.fragment,
           # which 02-build-baseline.sh appends after the defconfig (last value
           # wins). It is part of the config set, so it changes the tag hash.
@@ -263,6 +278,7 @@ jobs:
               "builder": {"repo": e["BUILDER_REPO"], "commit": e["BUILDER_REF"]},
               "config_from_lab": {"repo": e["LAB_REPO"], "commit": e["LAB_REF"]} if e["LAB_REPO"] else None,
               "extra_config": [l for l in open("polyci-extra.config").read().splitlines() if l],
+              "drop_config": [l for l in open("polyci-drop.config").read().splitlines() if l],
               "host_qemu_removed": True,
               "kernel_sha256": sha("dist/bzImage"),
               "rootfs_sha256": sha("dist/rootfs.cpio.gz"),

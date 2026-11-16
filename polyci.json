@@ -2,7 +2,7 @@
   "_comment": "Everything PolyCI builds, pinned. Change a ref or a baseline release here, in a pull request; CI does the rest. Level users and counts come from each lab's lab.json; set 'users'/'levels' on a lab only if it has no lab.json (or to override it). See README.md.",
   "builder": {
     "repo": "ruffm/buildroot-builder2",
-    "ref": "3b2afe0fba7968a91ccf258486627485f1fd52ff",
+    "ref": "94bf9379dee63439e677d96f9d3ac68403e8473e",
     "buildroot_version": "2025.02.15"
   },
   "v86": {
@@ -29,7 +29,16 @@
         "ref": "4262596e92f53e3c9ffec07415ebe45a7e5dd9b0",
         "install_script": "install-builder-config.sh"
       },
-      "release": "baseline-networking-e206609908"
+      "release": "baseline-networking-e206609908",
+      "drop_config": [
+        "BR2_TOOLCHAIN_BUILDROOT_CXX",
+        "BR2_PACKAGE_HOST_LINUX_HEADERS_CUSTOM_6_12"
+      ],
+      "extra_config": [
+        "BR2_TOOLCHAIN_EXTERNAL=y",
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN=y",
+        "BR2_TOOLCHAIN_EXTERNAL_BOOTLIN_X86_I686_GLIBC_STABLE=y"
+      ]
     },
     "snort-defender": {
       "description": "Snort IDS, tcpdump, Python 3: the defender in the Snort lab",

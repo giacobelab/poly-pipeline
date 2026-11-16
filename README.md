@@ -123,7 +123,8 @@ and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
   the fork `ruffm/buildroot-builder2` (branch `polyci`) while its changes are
   pull requests to `giacobe/buildroot-builder2`: the basic set's BusyBox fix,
   no host QEMU, dropped-option and command checks, the Snort config sets and
-  rootfs-overlay packaging, and shared `config-common/` settings. Once Nick
+  rootfs-overlay packaging, shared `config-common/` settings, and Bootlin's
+  prebuilt i686 toolchain (instead of compiling GCC and glibc every build). Once Nick
   merges them, point `repo` and `ref` back at his repository. If the merged
   files are the same, the baseline tags stay the same.
 - `baselines.<type>.config_set` is a builder config set, or one a lab repo
@@ -131,7 +132,10 @@ and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
   builder, as Nick Giacobe's instructions say).
 - `baselines.<type>.extra_config`: extra `BR2_...` lines added to the end of
   the config set's `features.fragment` before the build (and so into the tag
-  hash), for a fix the builder does not have yet.
+  hash), for a fix the builder does not have yet. `drop_config` lists
+  options whose lines are removed first. The networking set (from
+  `polylinux-networking`) uses both to switch to the prebuilt toolchain the
+  builder's own sets get from `config-common/`.
 - Every baseline build runs `scripts/check-baseline.py` before publishing: each
   `BR2_...=y` the config set asks for must still be set after Buildroot's
   `olddefconfig`, and each command in `required-commands.txt` must be in the
