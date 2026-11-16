@@ -2,10 +2,12 @@
 """Check a freshly built baseline before it is published.
 
   check-baseline.py --config-set DIR --final-config FILE --rootfs rootfs.cpio.gz
-                    [--required required-commands.txt]
+                    [--required required-commands.txt] [--common-dir DIR]
 
 1. Every option the config set asks for (BR2_*=y in its defconfig and
-   features.fragment, the two files 02-build-baseline.sh applies) is still =y in Buildroot's final .config. Buildroot drops
+   features.fragment, the two files 02-build-baseline.sh applies, plus the
+   shared files the set's `includes` lists from --common-dir, unless the
+   set's own files mention that option) is still =y in Buildroot's final .config. Buildroot drops
    options whose dependencies are not met without saying so; for example
    BR2_PACKAGE_BASH needs BR2_PACKAGE_BUSYBOX_SHOW_OTHERS=y.
 2. Every command in required-commands.txt exists in the rootfs.
@@ -17,15 +19,27 @@ ASK = re.compile(r"^(BR2_[A-Z0-9_]+)=y\s*$")
 HAVE = re.compile(r"^(BR2_[A-Z0-9_]+)=y\s*$")
 
 
-def requested(config_set):
+def requested(config_set, common_dir=None):
     wanted = {}
+    own = set()
     for f in sorted(Path(config_set).iterdir()):
         # 02-build-baseline.sh applies only these two files to Buildroot.
         if f.name in ("defconfig", "features.fragment"):
             for line in f.read_text(errors="replace").splitlines():
+                own.update(re.findall(r"BR2_[A-Z0-9_]+", line))
                 m = ASK.match(line.strip().replace("\r", ""))
                 if m:
                     wanted.setdefault(m.group(1), f.name)
+    inc = Path(config_set) / "includes"
+    if common_dir and inc.exists():
+        for raw in inc.read_text().splitlines():
+            name = raw.split("#")[0].strip()
+            if not name:
+                continue
+            for line in (Path(common_dir) / name).read_text(errors="replace").splitlines():
+                m = ASK.match(line.strip().replace("\r", ""))
+                if m and m.group(1) not in own:
+                    wanted.setdefault(m.group(1), f"config-common/{name}")
     return wanted
 
 
@@ -51,10 +65,11 @@ def main():
     ap.add_argument("--final-config", required=True)
     ap.add_argument("--rootfs", required=True)
     ap.add_argument("--required")
+    ap.add_argument("--common-dir", help="the builder's config-common/ (for sets with an includes file)")
     a = ap.parse_args()
     problems = 0
 
-    wanted = requested(a.config_set)
+    wanted = requested(a.config_set, a.common_dir)
     final = {m.group(1) for line in Path(a.final_config).read_text().splitlines()
              if (m := HAVE.match(line.strip()))}
     dropped = sorted(k for k in wanted if k not in final)

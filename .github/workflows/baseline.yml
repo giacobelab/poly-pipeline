@@ -149,12 +149,18 @@ jobs:
           BUILDROOT_VERSION: ${{ steps.cfg.outputs.buildroot_version }}
         run: |
           # Hash = Buildroot version + every config-set file (README.md aside)
-          # + the builder's build script. Fragments are inside the config set.
+          # + the builder's shared config-common/ files, if it has them (a set's
+          # `includes` and kernel config can point there) + the build script.
           h=$( { echo "buildroot $BUILDROOT_VERSION"
                  for f in $(cd builder/config-sets/"$CONFIG_SET" && ls | sort); do
                    [ "$f" = README.md ] && continue
                    echo "== $f"; cat builder/config-sets/"$CONFIG_SET"/"$f"
                  done
+                 if [ -d builder/config-common ]; then
+                   for f in $(cd builder/config-common && ls | sort); do
+                     echo "== config-common/$f"; cat builder/config-common/"$f"
+                   done
+                 fi
                  echo "== 02-build-baseline.sh"; cat builder/scripts/02-build-baseline.sh
                } | sha256sum | cut -c1-10)
           tag="baseline-${TYPE}-${h}"
@@ -200,6 +206,7 @@ jobs:
           # than publish a baseline that labs will fail on.
           python3 polyci/scripts/check-baseline.py \
             --config-set builder/config-sets/"$CONFIG_SET" \
+            --common-dir builder/config-common \
             --final-config baseline/configs/final-buildroot.config \
             --rootfs baseline/images/rootfs.cpio.gz \
             --required builder/config-sets/"$CONFIG_SET"/required-commands.txt
