@@ -1,0 +1,52 @@
+# Delete old PolyCI releases and tags that nothing uses (scripts/cleanup-releases.py).
+# Run it from the Actions tab. It is a dry run unless "delete" is ticked: the
+# run summary lists what would go and why everything else stays. Pinned
+# baselines and every lab's current release are never deleted.
+name: Clean up releases
+run-name: ${{ github.event_name == 'schedule' && 'Clean up releases (monthly report)' || (inputs.delete && 'Clean up releases' || 'Clean up releases (dry run)') }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      delete:
+        description: Really delete (leave unticked to only see what would be deleted)
+        type: boolean
+        default: false
+      keep_previous:
+        description: Older releases to keep per baseline type and per lab, for rollback
+        default: '1'
+      min_age_days:
+        description: Keep anything younger than this many days
+        default: '7'
+  schedule:
+    - cron: '41 13 1 * *'   # monthly report only (dry run); never deletes
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cleanup-releases
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    name: Clean up releases
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # delete releases and tags
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: List (and delete) unused releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Deleting only from a manual run on the default branch, where
+          # polyci.json says what is pinned and current.
+          DELETE: ${{ github.event_name == 'workflow_dispatch' && inputs.delete && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          KEEP_PREVIOUS: ${{ inputs.keep_previous || '1' }}
+          MIN_AGE_DAYS: ${{ inputs.min_age_days || '7' }}
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY" --keep-previous "$KEEP_PREVIOUS"
+                --min-age-days "$MIN_AGE_DAYS" --summary "$GITHUB_STEP_SUMMARY")
+          [ "$DELETE" = true ] && args+=(--delete)
+          python3 scripts/cleanup-releases.py "${args[@]}"
