@@ -678,6 +678,23 @@ jobs:
             echo "Opened a PR from $BRANCH" >> "$GITHUB_STEP_SUMMARY"
           fi
 
+  # Weekly run only: once every lab has passed and the site is deployed,
+  # delete releases nothing uses any more (Clean up releases, with its
+  # defaults: keep one previous release per lab and baseline type, and
+  # anything younger than 7 days).
+  cleanup:
+    name: Clean up unused releases
+    needs: [plan, all-labs, pages]
+    if: >-
+      always() && github.event_name == 'schedule' &&
+      needs.plan.outputs.publish == 'true' &&
+      needs.all-labs.result == 'success' && needs.pages.result == 'success'
+    permissions:
+      contents: write   # delete releases and tags
+    uses: ./.github/workflows/cleanup.yml
+    with:
+      delete: true
+
   pages:
     name: Deploy to GitHub Pages
     needs: [plan, lab, group]

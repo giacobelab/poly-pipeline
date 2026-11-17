@@ -345,9 +345,10 @@ jobs:
             --title "Baseline $TYPE (Buildroot $BUILDROOT_VERSION, ${TAG##*-})" \
             --notes-file notes.md \
             dist/bzImage dist/rootfs.cpio.gz dist/baseline-manifest.tar.gz dist/baseline.json dist/SHA256SUMS
+          echo "::notice title=Next: test it::Build labs -> baseline_override: $TYPE (or latest), promote ticked"
           {
             echo "### Published pre-release \`$TAG\`"
-            echo "1. Test: **Build labs** → Run workflow with \`baseline_override\` = \`$TYPE=$TAG\`."
-            echo "2. Promote: \`gh release edit $TAG --prerelease=false --latest=false\`"
-            echo "3. Pin it: \`baselines.$TYPE.release = \"$TAG\"\` in polyci.json."
+            echo "Next: **Build labs** → Run workflow with \`baseline_override\` = \`$TYPE\`"
+            echo "(the newest $TYPE baseline, i.e. this one), or \`latest\` once every baseline you"
+            echo "are rebuilding is published, and tick **promote**. Merge the pin PR it opens."
           } >> "$GITHUB_STEP_SUMMARY"

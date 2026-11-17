@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 """Turn polyci.json into the lab build matrix.
 
-  plan.py [--labs a,b] [--baseline-override TYPE=TAG,...] [--check-releases REPO]
+  plan.py [--labs a,b] [--baseline-override ITEM,...] [--check-releases REPO]
+          [--repo OWNER/REPO]
+
+--baseline-override items (comma-separated):
+  baseline-TYPE-<hash> or TYPE=baseline-TYPE-<hash>   that release
+  TYPE                                                the newest release of TYPE
+  latest                                              the newest release of every
+                                                      type that is newer than its pin
+TYPE and latest look the releases up in --repo (default $GITHUB_REPOSITORY).
           [--github-output FILE]
 
 Each matrix entry carries everything one lab's job needs, plus a mode:
@@ -24,7 +32,7 @@ is <lab>-<7 hex of the VM commits>-<10 hex of the baseline tags>-release.
 With --github-output, writes matrix=<json>, count=<n>, groups=<json>,
 group_count=<n>, any_build=<bool> and overrides=<json>.
 """
-import argparse, hashlib, json, re, subprocess, sys
+import argparse, hashlib, json, os, re, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -47,6 +55,25 @@ def pipeline_digest():
         for f in files:
             h.update(str(f.relative_to(ROOT)).encode() + b"\0" + f.read_bytes() + b"\0")
     return h.hexdigest()
+
+
+def baseline_releases(repo, baselines):
+    """{type: [(created_at, tag), ...] newest first} for this repo's baseline releases."""
+    if not repo:
+        die("naming a baseline by type or 'latest' needs --repo (or GITHUB_REPOSITORY)")
+    try:
+        out = subprocess.run(["gh", "api", "--paginate", f"repos/{repo}/releases", "--jq",
+                              '.[] | select(.draft | not) | [.created_at, .tag_name] | @tsv'],
+                             check=True, capture_output=True, text=True, timeout=120).stdout
+    except (OSError, subprocess.SubprocessError) as e:
+        die(f"could not list the releases of {repo}: {e}")
+    found = {}
+    for line in out.splitlines():
+        created, _, tag = line.partition("\t")
+        btype = max((n for n in baselines if tag.startswith(f"baseline-{n}-")), key=len, default="")
+        if btype and TAG.match(tag):
+            found.setdefault(btype, []).append((created, tag))
+    return {t: sorted(v, reverse=True) for t, v in found.items()}
 
 
 def released_fingerprint(repo, tag):
@@ -131,10 +158,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--labs", default="", help="comma-separated lab ids (default: all)")
     ap.add_argument("--baseline-override", default="",
-                    help="TYPE=TAG or just TAG, comma-separated: use these baseline releases "
-                         "(e.g. to test a pre-release)")
+                    help="comma-separated: TAG, TYPE=TAG, TYPE (its newest release) or latest "
+                         "(every type's newest release that is newer than its pin)")
     ap.add_argument("--check-releases", default="", metavar="OWNER/REPO",
                     help="reuse lab releases in this repo when their fingerprint matches")
+    ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""),
+                    help="where to look up baseline releases for TYPE and latest")
     ap.add_argument("--github-output")
     a = ap.parse_args()
 
@@ -142,9 +171,25 @@ def main():
     baselines, labs = cfg["baselines"], cfg["labs"]
 
     override = {}
-    for item in (x.strip() for x in a.baseline_override.split(",")):
-        if not item:
-            continue
+    items = [x.strip() for x in a.baseline_override.split(",") if x.strip()]
+    newest = None
+    if any(i == "latest" or i in baselines for i in items):
+        newest = baseline_releases(a.repo, baselines)
+    expanded = []
+    for item in items:
+        if item == "latest":
+            newer = [newest[t][0][1] for t in baselines
+                     if newest.get(t) and newest[t][0][1] != baselines[t].get("release")]
+            if not newer:
+                die("latest: every baseline type's newest release is already pinned; nothing to test")
+            expanded += newer
+        elif item in baselines:
+            if not newest.get(item):
+                die(f"{item}: no baseline-{item}-... release found in {a.repo}")
+            expanded.append(newest[item][0][1])
+        else:
+            expanded.append(item)
+    for item in expanded:
         btype, eq, tag = item.partition("=")
         if not eq:  # a bare tag: the type is in its name
             tag = item
@@ -235,6 +280,12 @@ def main():
         die(f"no lab in this run uses the overridden baseline(s) {untested}; "
             f"add a lab that does to 'labs' (or leave 'labs' blank)")
 
+    if override:
+        print("Baselines under test (pinned -> this run):")
+        for t in baselines:
+            if t in override:
+                print(f"  {t:<16} {baselines[t].get('release') or '(none)'} -> {override[t]}")
+        print()
     for m in matrix + groups:
         print(f"{m['lab']:<24} {m['mode']:<6} {m['why']}")
     out = json.dumps({"include": matrix})

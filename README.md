@@ -168,9 +168,9 @@ and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
 | Workflow | When | What |
 |---|---|---|
 | **Publish baseline** (`baseline.yml`) | by hand, per type | Build, smoke-boot, publish `baseline-<type>-<hash>` as a pre-release |
-| **Build labs** (`labs.yml`) | push, PR, weekly, by hand | Per lab: overlay, join, test; on `main`: releases + Pages |
+| **Build labs** (`labs.yml`) | push, PR, weekly, by hand | Per lab: overlay, join, test; on `main`: releases + Pages; weekly: then clean up releases |
 | **Propose lab updates** (`update-labs.yml`) | weekly, by hand | PR moving lab refs to their repos' newest commits |
-| **Clean up releases** (`cleanup.yml`) | by hand; monthly report | Delete old baseline and unused releases |
+| **Clean up releases** (`cleanup.yml`) | by hand; weekly from Build labs | Delete old baseline and unused releases |
 
 The required check for branch protection is **`all labs pass`**: one check,
 however many labs there are.
@@ -199,12 +199,15 @@ The page test uses the runner's Chrome with a cached `puppeteer-core`.
 ## Day-to-day
 
 **First baseline of a type**
-1. Actions → **Publish baseline** → Run workflow → pick the type. About an
-   hour; publishes a pre-release.
+1. Actions → **Publish baseline** → Run workflow → pick the type. Publishes
+   a pre-release; the run's summary says what to do next.
 2. Actions → **Build labs** → Run workflow with `baseline_override` = the
-   tag (e.g. `baseline-networking-fc3d6448a7`; `TYPE=TAG` also works, and
-   several can be comma-separated) and tick **promote**. Leave `labs` blank or
-   name labs that use that baseline. Nothing is published from this run.
+   type (e.g. `networking`: its newest release) and tick **promote**. After
+   publishing several types, `latest` tests every type whose newest release is
+   newer than its pin. Several types, or exact tags (`baseline-networking-…`,
+   `TYPE=TAG`), can be comma-separated. Leave `labs` blank or name labs that
+   use those baselines. The run's summary lists pinned → tested for each type.
+   Nothing is published from this run.
 3. If every lab passes, the **Promote and pin tested baselines** job marks the
    baseline as a full release and opens a PR (`polyci/pin-baselines`) setting
    `baselines.TYPE.release` in `polyci.json`. Merge it: that releases every lab
@@ -241,13 +244,14 @@ to delete those releases and their tags. Pinned baselines and every lab's
 current release are always kept, plus the newest `keep_previous` older ones
 per baseline type and per lab (for rollback) and anything younger than
 `min_age_days`. Releases of labs or baseline types no longer in `polyci.json`
-go. Tags that do not look like PolyCI releases are never touched. A monthly
-run posts the same report without deleting anything.
+go. Tags that do not look like PolyCI releases are never touched. The
+weekly **Build labs** run does the same with **delete** and the defaults,
+once every lab has passed and the site is deployed.
 
 **The Snort lab, first time:** run **Publish baseline** for `snort-defender`
 and for `snort-attacker`. Then run **Build labs** with labs `netsec-snort`,
-baseline_override `baseline-snort-defender-<hash>,baseline-snort-attacker-<hash>`
-and **promote** ticked. Merge the pin PR it opens.
+baseline_override `snort-defender,snort-attacker` and **promote** ticked.
+Merge the pin PR it opens.
 
 ## Pages
 
