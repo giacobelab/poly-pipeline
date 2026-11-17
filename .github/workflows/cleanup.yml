@@ -2,8 +2,10 @@
 # Run it from the Actions tab. It is a dry run unless "delete" is ticked: the
 # run summary lists what would go and why everything else stays. Pinned
 # baselines and every lab's current release are never deleted.
+# The weekly Build labs run also calls it (with delete) once every lab has
+# passed and the site is deployed.
 name: Clean up releases
-run-name: ${{ github.event_name == 'schedule' && 'Clean up releases (monthly report)' || (inputs.delete && 'Clean up releases' || 'Clean up releases (dry run)') }}
+run-name: ${{ inputs.delete && 'Clean up releases' || 'Clean up releases (dry run)' }}
 
 on:
   workflow_dispatch:
@@ -18,8 +20,17 @@ on:
       min_age_days:
         description: Keep anything younger than this many days
         default: '7'
-  schedule:
-    - cron: '41 13 1 * *'   # monthly report only (dry run); never deletes
+  workflow_call:   # from labs.yml (weekly run)
+    inputs:
+      delete:
+        type: boolean
+        default: false
+      keep_previous:
+        type: string
+        default: '1'
+      min_age_days:
+        type: string
+        default: '7'
 
 permissions:
   contents: read
@@ -40,9 +51,9 @@ jobs:
       - name: List (and delete) unused releases
         env:
           GH_TOKEN: ${{ github.token }}
-          # Deleting only from a manual run on the default branch, where
-          # polyci.json says what is pinned and current.
-          DELETE: ${{ github.event_name == 'workflow_dispatch' && inputs.delete && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+          # Deleting only on the default branch, where polyci.json says what
+          # is pinned and current.
+          DELETE: ${{ inputs.delete == true && github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
           KEEP_PREVIOUS: ${{ inputs.keep_previous || '1' }}
           MIN_AGE_DAYS: ${{ inputs.min_age_days || '7' }}
         run: |

@@ -35,7 +35,7 @@ on:
         description: Only these labs (comma-separated ids from polyci.json; blank = all)
         default: ''
       baseline_override:
-        description: Test baseline pre-release(s) before pinning, e.g. baseline-networking-fc3d6448a7 (comma-separate several)
+        description: "Baselines to test before pinning: latest (every newer one), type names (snort-defender,snort-attacker) or tags"
         default: ''
       promote:
         description: If every lab passes on the override, mark those baselines as full releases and open a PR pinning them in polyci.json
