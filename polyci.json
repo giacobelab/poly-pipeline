@@ -56,12 +56,13 @@
   "labs": {
     "polybandit3.1": {
       "title": "PolyBandit 3.1",
-      "repo": "giacobe/polybandit3.1",
-      "ref": "0c95f01555f8b9e7da26c97f70d6d606d4b832ff",
+      "repo": "ruffm/polybandit3.1",
+      "ref": "5c37e6da3db2a1e1814066d407d6da12a204e5cb",
       "subdir": ".",
       "baseline": "filesystem",
       "self_test": "test.sh",
-      "boot_test": "v31"
+      "boot_test": "generic",
+      "server": true
     },
     "polylinux-basic": {
       "title": "PolyLinux Basic",
