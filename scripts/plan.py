@@ -26,6 +26,15 @@ settings, the poly-server and poly-solver pins and the lab's own polyci.json
 entry. Without --check-releases (the
 weekly run, or a forced run) every lab with a baseline is built.
 
+A lab whose polyci.json entry has only "repo" and "ref" (and, for several VMs,
+"vms" with only "repo" and "ref" each) is described by the lab.toml in that
+repo at that commit (scripts/manifest.py, docs/lab-toml.md); plan.py turns it
+into the same full entry, so both kinds of entry plan alike. --manifest-dir DIR
+reads <lab>.toml files from DIR instead of fetching them (to try one out).
+
+Every lab says which baseline files its overlay replaces (overlay.replaces);
+verify-image.py refuses any other replacement.
+
 A lab with "vms" (several VMs on one page, e.g. netsec-snort) goes into a
 second matrix, groups, which the workflow's multi-VM job runs. Its release tag
 is <lab>-<7 hex of the VM commits>-<10 hex of the baseline tags>-release.
@@ -35,6 +44,9 @@ group_count=<n>, any_build=<bool> and overrides=<json>.
 """
 import argparse, hashlib, json, os, re, subprocess, sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import manifest  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "polyci.json"
@@ -64,8 +76,6 @@ def private_pins(cfg, labs):
     for lab_id, lab in labs.items():
         if lab.get("server", False) not in (True, False):
             die(f"labs.{lab_id}.server must be true or false (no quotes), got {labs[lab_id]['server']!r}")
-    if any(lab.get("server") for lab in labs.values()) and "server" not in pins:
-        die("a lab has \"server\": true, so polyci.json needs a \"server\" pin (poly-server)")
     return pins
 
 
@@ -121,6 +131,13 @@ def released_fingerprint(repo, tag):
 NAME = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
 
 
+def replaced_paths(lab_id, paths):
+    """overlay.replaces: absolute file paths, stored without the leading /."""
+    if not isinstance(paths, list) or not all(isinstance(p, str) and p.startswith("/") for p in paths):
+        die(f"labs.{lab_id}: overlay replaces must be a list of absolute paths, like [\"/etc/inittab\"]")
+    return sorted(p.strip("/") for p in paths)
+
+
 def plan_group(lab_id, lab, cfg, baselines, override, pipeline, decide, pins):
     """Matrix entry for a lab made of several VMs on one page."""
     vms = lab["vms"]
@@ -173,6 +190,7 @@ def plan_group(lab_id, lab, cfg, baselines, override, pipeline, decide, pins):
         "overlay_dest": ov.get("dest", "/"),
         "overlay_permissions": ov.get("permissions", ""),
         "overlay_checksums": ov.get("checksums", ""),
+        "overlay_replaces": " ".join(f"/{p}" for p in replaced_paths(lab_id, ov.get("replaces", []))),
         "boot_test": lab["boot_test"],
         "release_tag": release_tag,
         "fingerprint": fingerprint,
@@ -192,6 +210,7 @@ def main():
     ap.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""),
                     help="where to look up baseline releases for TYPE and latest")
     ap.add_argument("--github-output")
+    ap.add_argument("--manifest-dir", help="read <lab>.toml from here instead of fetching each lab's lab.toml")
     a = ap.parse_args()
 
     cfg = json.loads(CONFIG.read_text())
@@ -258,6 +277,20 @@ def main():
 
     for lab_id in wanted:
         lab = labs[lab_id]
+        if manifest.is_pin_only(lab):
+            text = None
+            if a.manifest_dir:
+                local = Path(a.manifest_dir) / f"{lab_id}.toml"
+                text = local.read_text() if local.exists() else None
+            try:
+                lab = manifest.resolve(lab_id, lab, text)
+            except manifest.ManifestError as e:
+                die(f"labs.{lab_id}: {e}")
+        if lab.get("server", False) not in (True, False):
+            die(f"labs.{lab_id}.server must be true or false (no quotes), got {lab['server']!r}")
+        if lab.get("server") and "server" not in pins:
+            die(f"labs.{lab_id} gets its values from the PolyLab server, so polyci.json needs a "
+                "\"server\" pin (poly-server)")
         if "vms" in lab:
             groups.append(plan_group(lab_id, lab, cfg, baselines, override, pipeline, decide, pins))
             continue
@@ -290,6 +323,10 @@ def main():
             "repo": lab["repo"],
             "ref": lab["ref"],
             "subdir": lab.get("subdir", "."),
+            "overlay_dest": lab.get("overlay_dest", "/root"),
+            "overlay_permissions": lab.get("overlay_permissions", ""),
+            "overlay_checksums": lab.get("overlay_checksums", ""),
+            "overlay_replaces": " ".join(f"/{p}" for p in replaced_paths(lab_id, lab.get("overlay_replaces", []))),
             "renames": " ".join(f"--rename {k}={v}" for k, v in sorted(lab.get("rename", {}).items())),
             "baseline_type": btype,
             "baseline_tag": baseline_tag,

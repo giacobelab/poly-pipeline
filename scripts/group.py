@@ -90,6 +90,8 @@ def build(a, group):
         req = base / "manifest" / "required-commands.txt"
         if req.exists():
             verify += ["--required", req]
+        # The lab's overlay.replaces (shared by its VMs).
+        verify += ["--replaces", *group.get("overlay_replaces", "").split()]
         print(f"::group::Verify {name}", flush=True)
         run(*verify)
         print("::endgroup::", flush=True)

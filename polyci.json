@@ -92,7 +92,8 @@
         "subdir": "rootfs-overlay",
         "dest": "/",
         "permissions": "permissions.txt",
-        "checksums": "SHA256SUMS"
+        "checksums": "SHA256SUMS",
+	"replaces": ["/etc/hostname", "/etc/init.d/S45connman", "/etc/inittab", "/etc/issue", "/etc/network/interfaces"]
       },
       "vms": {
         "defender": {

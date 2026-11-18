@@ -4,6 +4,7 @@
   verify-image.py --packaged packaged.rootfs.cpio.gz --base rootfs.cpio.gz
                   --lab lab.cpio.gz --manifest lab-manifest.txt
                   [--required required-commands.txt] [--command NAME ...]
+                  [--replaces /etc/inittab ...]
 
 1. packaged == base bytes followed by lab bytes (the base is untouched)
 2. after unpacking both archives in order (as the kernel does), every file in
@@ -12,10 +13,18 @@
 3. no lab directory lands where the base has a file or symlink (the kernel
    would delete it: e.g. a base whose /bin is a symlink to usr/bin)
 4. every required command exists in bin, sbin, usr/bin or usr/sbin
+5. the layer rule: the lab may add files, but it replaces a baseline file only
+   where the lab says so (--replaces, from overlay.replaces), never the boot
+   essentials (PROTECTED), and it puts nothing under /etc/polylab/, which is
+   the PolyLab server's per-student layer (scripts/check-scenario.py)
 """
 import argparse, gzip, hashlib, stat, sys
 
 errors = []
+
+# Never replaced by a lab, whatever it declares: what boots the VM and runs every command.
+PROTECTED = ("init", "linuxrc", "sbin/init", "bin/sh", "bin/busybox")
+PROTECTED_DIRS = ("lib/", "usr/lib/")
 
 
 def err(msg):
@@ -51,6 +60,8 @@ def main():
     ap.add_argument("--manifest", required=True)
     ap.add_argument("--required")
     ap.add_argument("--command", action="append", default=[])
+    ap.add_argument("--replaces", nargs="*", default=[], metavar="PATH",
+                    help="baseline files the lab declares it replaces (overlay.replaces)")
     a = ap.parse_args()
 
     packaged, base, lab = (open(p, "rb").read() for p in (a.packaged, a.base, a.lab))
@@ -62,6 +73,19 @@ def main():
         if stat.S_ISDIR(mode) and name in base_view and not stat.S_ISDIR(base_view[name][0]):
             err(f"the lab makes /{name} a directory, but in the baseline it is a "
                 f"{'symlink' if stat.S_ISLNK(base_view[name][0]) else 'file'}: the kernel would remove it")
+
+    # 5. the layer rule
+    declared = {p.strip("/") for p in a.replaces}
+    replaced = sorted(n for n, (m, _) in lab_view.items() if n in base_view and not stat.S_ISDIR(m))
+    for name in replaced:
+        if name in PROTECTED or (name.startswith(PROTECTED_DIRS) and not stat.S_ISDIR(base_view[name][0])):
+            err(f"the lab replaces /{name}, which no lab may replace (it boots the VM or runs every command)")
+        elif name not in declared:
+            err(f"the lab replaces the baseline's /{name} without declaring it: add \"/{name}\" to "
+                f"overlay.replaces (lab.toml, or the lab's polyci.json entry) if that is intended")
+    for name in lab_view:
+        if name == "etc/polylab" or name.startswith("etc/polylab/"):
+            err(f"the lab ships /{name}: /etc/polylab/ is reserved for the PolyLab server's per-student layer")
 
     checked = 0
     for line in open(a.manifest):
@@ -95,7 +119,8 @@ def main():
         print(f"Image verification FAILED with {len(errors)} problem(s).")
         sys.exit(1)
     print(f"Image verification passed: base untouched, {checked} lab files match their commit, "
-          f"{len(dict.fromkeys(commands))} commands present.")
+          f"{len(dict.fromkeys(commands))} commands present, {len(replaced)} declared baseline "
+          f"file(s) replaced.")
 
 
 if __name__ == "__main__":

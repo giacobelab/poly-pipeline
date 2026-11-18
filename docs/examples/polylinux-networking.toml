@@ -1,0 +1,23 @@
+# What the PolyLab pipeline needs to know to build and test this lab.
+# The format: https://github.com/Giacobelab/poly-pipeline/blob/main/docs/lab-toml.md
+schema = 1
+id = "polylinux-networking"
+title = "PolyLinux Networking"
+
+# The PolyLab baseline image the lab is built on: network namespaces, veth,
+# netem, dnsmasq, traceroute, curl and sudo.
+baseline = "networking"
+
+[overlay]
+# Only payload/ goes into the image, as /root; the rest of the repo
+# (verify.sh, the builder config, docs) stays out.
+folder = "payload"
+dest = "/root"
+
+[levels]
+count = 10
+users = "level{n}"
+
+[test]
+# Boot in QEMU, let install.sh log in as level1, then reach every level with nextlevel.
+boot = "generic"
