@@ -68,7 +68,7 @@
       "subdir": ".",
       "baseline": "basic",
       "boot_test": "generic", 
-      "server": "true"
+      "server": true
     },
     "polylinux-networking": {
       "title": "PolyLinux Networking",
