@@ -136,6 +136,29 @@ private half of a read-only deploy key on that repo). Pull requests from
 forks get no secrets, so they can't run these tests; branches in this repo
 can.
 
+## Labs that describe themselves (`lab.toml`)
+
+A lab repo can carry a **`lab.toml`** saying how to build and test it: its
+baseline, overlay folder, boot test, server values and VMs. Its `polyci.json`
+entry then shrinks to a pin:
+
+```json
+"polylinux-basic": { "repo": "ruffm/polylinux-basic", "ref": "<full commit SHA>" }
+```
+
+`scripts/plan.py` reads `lab.toml` from that repo at that commit and plans the
+lab exactly as if the full entry were in `polyci.json`. Labs without one keep
+their full entry, so they can move over one at a time.
+[docs/lab-toml.md](docs/lab-toml.md) has the format and the three-layer rule,
+and [docs/examples/](docs/examples/) has a `lab.toml` for every current lab.
+
+**The layer rule, checked on every build:**
+- **The lab layer** may add files, but it may replace a baseline file only if
+  `overlay.replaces` lists it. It may never replace what boots the VM, and may
+  put nothing under `/etc/polylab/` (`verify-image.py`).
+- **The PolyLab server's per-student layer** may hold only files under
+  `/etc/polylab/` (`check-scenario.py`).
+
 ## `polyci.json`
 
 ```jsonc
@@ -199,8 +222,13 @@ can.
   config set).
 - `labs.<id>.server`: `true` (no quotes) if the lab's values come from the
   PolyLab server (poly-server's `labs/` must know the lab).
+- `labs.<id>` with only `repo` and `ref` (plus `vms` with only `repo` and
+  `ref` each) is read from the lab's `lab.toml` (see above).
 - `labs.<id>.subdir` is the folder that becomes `/root`; `rename` renames files
   inside it (e.g. `installbandit.sh` → `install.sh`).
+- `labs.<id>.overlay.replaces` (multi-VM) or `labs.<id>.overlay_replaces`
+  (one VM): the baseline files the lab's overlay replaces on purpose, as
+  absolute paths. Any other replacement fails the build.
 - `labs.<id>.boot_test`: `v31` checks PolyBandit 3.1 answers and screens
   exactly; `generic` works for any PolyLinux lab (installer logs in as the
   first user, `nextlevel` reaches every level's user).
@@ -311,6 +339,8 @@ landing page and one playable page per lab (`/<lab-id>/`). One-time setup:
 ## Running pieces locally
 
 ```sh
+python3 -m unittest discover -s tests                     # the pipeline's own tests
+python3 scripts/manifest.py check ../some-lab/lab.toml     # check a lab.toml
 python3 scripts/plan.py                                   # what CI will build
 python3 scripts/make-overlay.py --repo ../polybandit3.1 --ref <sha> --out lab.cpio.gz --manifest m.txt
 cat rootfs.cpio.gz lab.cpio.gz > packaged.rootfs.cpio.gz
