@@ -266,6 +266,7 @@ jobs:
           V86_VERSION: ${{ steps.v86.outputs.version }}
           LABEL: ${{ matrix.release_tag }}
           LEVELS: ${{ steps.settings.outputs.levels }}
+          SERVER: ${{ matrix.server && '1' || '0' }}
         run: LAB_JSON=lab/lab.json bash polyci/scripts/assemble-site.sh out v86src/bios site
 
       # ---- tests (build only), boot test and page test side by side ----
@@ -288,7 +289,19 @@ jobs:
           BOOT_TEST: ${{ matrix.boot_test }}
           USERS: ${{ steps.settings.outputs.users }}
           LEVELS: ${{ steps.settings.outputs.levels }}
+          SERVER: ${{ matrix.server }}
         run: |
+          # A lab whose values come from the PolyLab server is tested with a
+          # throwaway key: the boot test appends a student archive made with
+          # it, and the page test runs against server/polylab_server.py.
+          scenario=()
+          if [ "$SERVER" = true ]; then
+            POLYLAB_KEY=$(python3 polyci/server/polylab_server.py new-key)
+            export POLYLAB_KEY POLYLAB_DATA="$RUNNER_TEMP/polylab-data"
+            python3 polyci/server/polylab_server.py archive --lab "$LAB" --email ci-test@psu.edu \
+              --out out/student.cpio.gz
+            scenario=(--scenario out/student.cpio.gz)
+          fi
           # Tools image: wait for the background pull to finish.
           while [ ! -f "$RUNNER_TEMP/pull.rc" ]; do sleep 1; done
           [ "$(cat "$RUNNER_TEMP/pull.rc")" = 0 ] || { cat "$RUNNER_TEMP/pull.log"; echo "::error::could not pull $TOOLS_IMAGE"; exit 1; }
@@ -299,13 +312,21 @@ jobs:
           docker run --rm "${kvm[@]}" -v "$PWD:/w" -w /w "$TOOLS_IMAGE" \
             python3 polyci/scripts/boot-test.py --flavor "$BOOT_TEST" --users "$USERS" --levels "$LEVELS" \
               --kernel out/packaged.bzImage --initrd out/packaged.rootfs.cpio.gz --log out/boot.log $flag \
-            > out/boot-test.txt 2>&1 &
+              "${scenario[@]}" > out/boot-test.txt 2>&1 &
           boot=$!
 
           pt=~/.cache/polyci-page-test
           cp polyci/scripts/page-test.mjs "$pt/"
-          python3 -m http.server 8080 --directory site --bind 127.0.0.1 >/dev/null 2>&1 &
-          node "$pt/page-test.mjs" http://127.0.0.1:8080/ out/page-shots "$USERS" > out/page-test.txt 2>&1 &
+          if [ "$SERVER" = true ]; then
+            mkdir -p siteroot && cp -r site "siteroot/$LAB"
+            python3 polyci/server/polylab_server.py serve --site siteroot --port 8080 > out/server.log 2>&1 &
+            url="http://127.0.0.1:8080/$LAB/"
+          else
+            python3 -m http.server 8080 --directory site --bind 127.0.0.1 >/dev/null 2>&1 &
+            url="http://127.0.0.1:8080/"
+          fi
+          sleep 1
+          node "$pt/page-test.mjs" "$url" out/page-shots "$USERS" > out/page-test.txt 2>&1 &
           page=$!
 
           b=0; wait "$boot" || b=$?
@@ -327,12 +348,14 @@ jobs:
             out/boot-test.txt
             out/page-test.txt
             out/page-shots/
+            out/server.log
           if-no-files-found: ignore
 
       - name: Release files
         if: matrix.mode == 'build'
         env:
           REPO: ${{ matrix.repo }}
+          SERVER: ${{ matrix.server }}
         run: |
           mkdir -p dist
           cp out/packaged.bzImage out/packaged.rootfs.cpio.gz out/lab.cpio.gz out/lab-manifest.txt dist/
@@ -355,7 +378,14 @@ jobs:
           }
           json.dump(info, open("dist/release.json", "w"), indent=2)
           PY
-          (cd dist && sha256sum packaged.bzImage packaged.rootfs.cpio.gz lab.cpio.gz lab-manifest.txt release.json > SHA256SUMS)
+          files=(packaged.bzImage packaged.rootfs.cpio.gz lab.cpio.gz lab-manifest.txt release.json)
+          if [ "$SERVER" = true ]; then
+            # Server labs are not on GitHub Pages: the finished page goes in the
+            # release, to unpack on the PolyLab server (see server/README.md).
+            tar -czf dist/site.tar.gz -C site .
+            files+=(site.tar.gz)
+          fi
+          (cd dist && sha256sum "${files[@]}" > SHA256SUMS)
           cat dist/release.json
 
       - name: Upload images
@@ -385,7 +415,8 @@ jobs:
             gh release download "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" -p release.json -O old-release.json
             same=$(python3 -c "import json; o=json.load(open('old-release.json')); n=json.load(open('dist/release.json')); print(o['packaged_rootfs_sha256']==n['packaged_rootfs_sha256'] and o['lab_cpio_sha256']==n['lab_cpio_sha256'])")
             if [ "$same" = True ]; then
-              gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --clobber dist/release.json dist/SHA256SUMS
+              extra=(); [ ! -f dist/site.tar.gz ] || extra=(dist/site.tar.gz)
+              gh release upload "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --clobber dist/release.json dist/SHA256SUMS "${extra[@]}"
               echo "$RELEASE_TAG: images unchanged; recorded the new pipeline fingerprint." | tee -a "$GITHUB_STEP_SUMMARY"
             else
               echo "::warning::$RELEASE_TAG already exists with different images (PolyCI's packaging changed). Left it unchanged; this lab will keep fully rebuilding until its commit or baseline changes, or you delete that release so it can be republished."
@@ -403,10 +434,14 @@ jobs:
 
           Boot \`packaged.bzImage\` with \`packaged.rootfs.cpio.gz\` as the initrd (v86 or QEMU).
           EOF
+          if [ -f dist/site.tar.gz ]; then
+            printf '\nThis lab gets its values from the PolyLab server: unpack `site.tar.gz` into the\nserver site folder `%s/` (see server/README.md). It is not on GitHub Pages.\n' "$LAB" >> notes.md
+          fi
+          extra=(); [ ! -f dist/site.tar.gz ] || extra=(dist/site.tar.gz)
           gh release create "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
             --title "$TITLE (${REF:0:7} on $BASELINE_TYPE ${BASELINE_TAG##*-})" --notes-file notes.md \
             dist/packaged.bzImage dist/packaged.rootfs.cpio.gz dist/lab.cpio.gz \
-            dist/lab-manifest.txt dist/release.json dist/SHA256SUMS
+            dist/lab-manifest.txt dist/release.json dist/SHA256SUMS "${extra[@]}"
           echo "Published **$RELEASE_TAG**" >> "$GITHUB_STEP_SUMMARY"
 
   # Labs made of several VMs on one page (labs.<id>.vms, e.g. netsec-snort).
@@ -726,6 +761,12 @@ jobs:
           mkdir -p public
           for d in sites/site-*; do
             [ -d "$d" ] || continue
+            # Labs whose values come from the PolyLab server need it to run,
+            # which GitHub Pages cannot do: they are deployed to the server.
+            if python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("server") else 1)' "$d/build.json" 2>/dev/null; then
+              echo "${d#sites/site-}: needs the PolyLab server; not on Pages"
+              continue
+            fi
             cp -r "$d" "public/${d#sites/site-}"
           done
           python3 scripts/make-landing.py public

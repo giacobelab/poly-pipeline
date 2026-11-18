@@ -3,6 +3,10 @@
 // with a real Shift+2 for "@") is accepted, the installer logs in as the
 // first level's user, and nextlevel reaches the second level's user.
 // Users are checked with whoami, so this works for any PolyLinux lab.
+// For a lab whose values come from the PolyLab server (build.json "server"),
+// the email goes into the page's start form instead, the installer must not
+// ask for it, and the first level's README must name it. Serve the site with
+// server/polylab_server.py for that.
 // Usage: node page-test.mjs <url> <screenshot-dir> [user-pattern, e.g. "level{n}"]
 import puppeteer from "puppeteer-core";
 import fs from "node:fs";
@@ -79,12 +83,28 @@ async function whoami() {
 let ok = false;
 try {
   await page.goto(url, { waitUntil: "load" });
-  await waitFor(/Enter your email/, 240000, "the installer prompt (boot + auto-login)");
-  console.log(`installer prompt on screen after ${secs()}`);
-  await page.click("#screen_container");
-  await typeText("ci-page@psu.edu\n");
-  await waitFor(/ci-page@psu\.edu.*\(y\/n\)/, 30000, "the email confirmation");
-  await typeText("y\n");
+  const server = await page.evaluate(async () => {
+    const r = await fetch("build.json");
+    return r.ok && (await r.json()).server === true;
+  }).catch(() => false);
+  if (server) {
+    await page.waitForSelector("#start:not([hidden])", { timeout: 30000 });
+    await page.type("#email", "CI-Page@psu.edu ");
+    await page.click("#go");
+    console.log("server lab: email entered in the page's start form");
+    await waitFor(/Exercise code|Enter your email/, 240000, "the installer (boot + auto-login)");
+    if (/Enter your email/.test(await screenText()))
+      throw new Error("the installer asked for an email although the server's values were appended");
+    console.log(`installer started with the server's values after ${secs()}`);
+    await page.click("#screen_container");
+  } else {
+    await waitFor(/Enter your email/, 240000, "the installer prompt (boot + auto-login)");
+    console.log(`installer prompt on screen after ${secs()}`);
+    await page.click("#screen_container");
+    await typeText("ci-page@psu.edu\n");
+    await waitFor(/ci-page@psu\.edu.*\(y\/n\)/, 30000, "the email confirmation");
+    await typeText("y\n");
+  }
 
   // Installer runs, then logs in as the first user and shows its README.
   let who = "";
@@ -97,6 +117,13 @@ try {
   }
   if (who !== user(1)) throw new Error(`installer did not log in as ${user(1)} (whoami: ${who || "no answer"})`);
   console.log(`logged in as ${user(1)} after ${secs()}`);
+  if (server) {
+    await typeText("clear; grep -c -F 'Participant: ci-page@psu.edu' README.txt\n");
+    await sleep(2000);
+    if (!/^\s*[1-9]\d*\s*$/m.test(await screenText()))
+      throw new Error("the first level's README does not name ci-page@psu.edu: the server's values were not used");
+    console.log(`${user(1)}'s README names ci-page@psu.edu (values from the server)`);
+  }
   await page.screenshot({ path: `${shots}/first-level.png` });
 
   const nextBy = Date.now() + 240000;

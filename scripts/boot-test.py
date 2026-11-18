@@ -13,8 +13,13 @@
   generic  any PolyLinux lab: the installer logs in as the first user, and
            nextlevel reaches every level's user (checked with whoami); the
            user names come from --users, e.g. level{n}
+
+--scenario ARCHIVE (generic flavor) tests a lab whose values come from the
+PolyLab server: the archive (polylab_server.py archive) is appended to the
+image as the page does, the installer must not ask for an email, and the first
+level's README must name the archive's participant.
 """
-import argparse, base64, functools, hashlib, re, shlex, sys, time
+import argparse, base64, functools, gzip, hashlib, json, os, re, shlex, sys, tempfile, time
 import pexpect
 
 # Flush every line so progress shows up live in the Actions log.
@@ -58,7 +63,22 @@ def expected_answer(flavor, email, guest_date, level):
     return b64.replace("+", "-").replace("/", "_")[:20]
 
 
-def generic(vm, run, a):
+def scenario_email(path):
+    """The participant's email in a server archive's etc/polylab/scenario.json."""
+    data, off = gzip.decompress(open(path, "rb").read()), 0
+    while off < len(data):
+        head = data[off:off + 110]
+        field = lambda i: int(head[6 + 8 * i:14 + 8 * i], 16)
+        namesize, size = field(11), field(6)
+        name = data[off + 110:off + 110 + namesize - 1].decode()
+        body_at = (off + 110 + namesize + 3) & ~3
+        if name == "etc/polylab/scenario.json":
+            return json.loads(data[body_at:body_at + size])["identity"]["email"]
+        off = (body_at + size + 3) & ~3
+    sys.exit(f"{path} has no etc/polylab/scenario.json")
+
+
+def generic(vm, run, a, email=None):
     """Lab-agnostic checks: first user after install, then every level via nextlevel."""
     user = lambda n: a.users.format(n=n)
     STAGE[0] = f"waiting for the installer to log in as {user(1)}"
@@ -76,6 +96,12 @@ def generic(vm, run, a):
             fail(f"expected to be logged in as {user(1)}, whoami says {who!r}")
         time.sleep(3)
     print(f"installer completed; logged in as {user(1)}")
+    if email:
+        STAGE[0] = f"checking that {user(1)}'s README names the server's participant"
+        shown = run("grep -c -F 'Participant: " + email + "' README.txt || true", timeout=30)
+        if shown.splitlines()[-1:] == ["0"] or not shown:
+            fail(f"README.txt of {user(1)} does not name {email}: the server's values were not used")
+        print(f"{user(1)}'s README names {email} (values from the server archive)")
 
     for n in range(2, a.levels + 1):
         STAGE[0] = f"moving to {user(n)} with nextlevel"
@@ -110,8 +136,21 @@ def main():
     ap.add_argument("--level-ready-timeout", type=int, default=300,
                     help="v31: how long nextlevel may keep saying a level is being prepared")
     ap.add_argument("--cmd", help="override the spawned command (for self-testing)")
+    ap.add_argument("--scenario", help="server archive to append to --initrd (generic flavor)")
     a = ap.parse_args()
     fl = FLAVORS[a.flavor]
+    email = None
+    if a.scenario:
+        if a.flavor != "generic":
+            ap.error("--scenario works with the generic flavor only")
+        email = scenario_email(a.scenario)
+        joined = tempfile.NamedTemporaryFile(prefix="initrd-", suffix=".cpio.gz", delete=False)
+        for part in (a.initrd, a.scenario):
+            with open(part, "rb") as fh:
+                joined.write(fh.read())
+        joined.close()
+        a.initrd = joined.name
+        print(f"server archive for {email} appended to the image")
 
     if a.cmd:
         cmd = a.cmd
@@ -151,25 +190,33 @@ def main():
         STAGE[0] = "booting to the installer prompt"
         while True:
             i = vm.expect([r"login: ?", r"[Pp]assword: ?",
-                           r"Enter your email address", r"Kernel panic.*"],
+                           r"Enter your email address", r"Kernel panic.*", r"Exercise code: \S+"],
                           timeout=a.boot_timeout)
             if i == 0:
                 vm.sendline("root")
             elif i == 1:
                 vm.sendline("")
             elif i == 2:
+                if email:
+                    fail("the installer asked for an email although the server's values were appended")
+                break
+            elif i == 4:
+                if not email:
+                    fail("the installer did not ask for an email")
+                print(f"installer started with the server's values ({vm.after.strip()})")
                 break
             else:
                 vm.expect([pexpect.TIMEOUT, pexpect.EOF], timeout=5)
                 fail("kernel panic during boot", ansi.sub("", vm.after + (vm.before or ""))[-1500:])
         print(f"reached installer after {time.time() - t_boot:.0f}s")
-        STAGE[0] = "answering the installer prompts"
-        vm.sendline(EMAIL)
-        vm.expect(r"\(y/n\)")
-        vm.sendline("y")
+        if not email:
+            STAGE[0] = "answering the installer prompts"
+            vm.sendline(EMAIL)
+            vm.expect(r"\(y/n\)")
+            vm.sendline("y")
 
         if a.flavor == "generic":
-            generic(vm, run, a)
+            generic(vm, run, a, email)
             print("boot test passed")
             return
 

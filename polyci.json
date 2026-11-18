@@ -63,11 +63,12 @@
     },
     "polylinux-basic": {
       "title": "PolyLinux Basic",
-      "repo": "giacobe/polylinux-basic",
-      "ref": "e08e56b2a73386043fafc8bd0c59f811b6f0262c",
+      "repo": "ruffm/polylinux-basic",
+      "ref": "59bc219d1e100a756b7f98e319252acfee826b7f",
       "subdir": ".",
       "baseline": "basic",
-      "boot_test": "generic"
+      "boot_test": "generic", 
+      "server": "true"
     },
     "polylinux-networking": {
       "title": "PolyLinux Networking",

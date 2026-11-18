@@ -34,6 +34,16 @@
   #help code { color: var(--text); background: #1d232b; padding: 1px 5px; border-radius: 4px; }
   footer { color: #5d6875; font-size: 12px; text-align: center; padding: 8px 0 20px; }
   footer a { color: inherit; }
+  [hidden] { display: none !important; }
+  #start { max-width: 520px; width: 100%; background: var(--panel, #14181d); border: 1px solid #222a33;
+    border-radius: 10px; padding: 22px; margin-top: 24px; }
+  #start h2 { margin: 0 0 6px; font-size: 17px; }
+  #start p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+  #start label { display: block; font-size: 14px; margin-bottom: 6px; }
+  #start input { width: 100%; box-sizing: border-box; font: inherit; color: var(--text); background: #0f1317;
+    border: 1px solid #2c3540; border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; }
+  #start .row { display: flex; align-items: center; gap: 12px; }
+  #start-error { color: #ff6b6b; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -46,13 +56,24 @@
   <button id="restart" title="Start over with a fresh machine (your progress is lost)">Restart</button>
 </header>
 <main>
+  <!-- Labs whose values come from the PolyLab server ask for the email here. -->
+  <form id="start" hidden>
+    <h2>Start the lab</h2>
+    <p>Your levels are generated for your email address, so use your Penn State email.</p>
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" required placeholder="abc123@psu.edu" autocomplete="email">
+    <div class="row">
+      <button id="go" type="submit">Start</button>
+      <span id="start-error" role="alert"></span>
+    </div>
+  </form>
   <div id="screen_container" tabindex="0">
     <div></div>
     <canvas></canvas>
   </div>
   <p id="help">
-    Click the terminal and type. Enter your Penn State email when asked, then follow the
-    instructions on screen. Use <code>nextlevel</code> and <code>prevlevel</code> to move between levels.
+    Click the terminal and type<span id="help-email">. Enter your Penn State email when asked,
+    then follow the instructions on screen</span>. Use <code>nextlevel</code> and <code>prevlevel</code> to move between levels.
     Everything runs in your browser; reloading the page starts over.
   </p>
 </main>
@@ -63,50 +84,104 @@
 <script src="v86/libv86.js"></script>
 <script>
 "use strict";
-// build.json is written by CI (title, release, grading form); absent when testing locally.
-fetch("build.json").then(r => r.ok ? r.json() : null).then(b => {
-  if (!b) return;
-  document.getElementById("build").textContent = b.label;
-  if (b.title) {
-    document.getElementById("title").textContent = b.title;
-    document.title = b.title;
-  }
-  if (b.form_url) {
-    const form = document.getElementById("form");
-    form.href = b.form_url;
-    form.hidden = false;
-  }
-}).catch(() => {});
-
 const statusEl = document.getElementById("status");
 const statusText = document.getElementById("status-text");
 const setStatus = (text, ready) => { statusText.textContent = text; statusEl.classList.toggle("ready", !!ready); };
+const $ = id => document.getElementById(id);
+let emulator = null;
 
-const emulator = new V86({
-  wasm_path: "v86/v86.wasm",
-  memory_size: 256 * 1024 * 1024,
-  vga_memory_size: 8 * 1024 * 1024,
-  screen_container: document.getElementById("screen_container"),
-  bios: { url: "v86/seabios.bin" },
-  vga_bios: { url: "v86/vgabios.bin" },
-  bzimage: { url: "images/packaged.bzImage" },
-  initrd: { url: "images/packaged.rootfs.cpio.gz" },
-  // console=ttyS0: kernel messages and the spare getty go to the (unseen)
-  // serial port, so the screen shows only the tty1 login, answered below.
-  // nomodeset: keeps bochs-drm from taking over the VGA card, which would
-  // switch the text console off and leave the screen blank.
-  cmdline: "console=ttyS0 nomodeset tsc=reliable mitigations=off random.trust_cpu=on",
-  autostart: true,
+// build.json is written by CI (title, release, grading form, whether the
+// lab's values come from the PolyLab server); absent when testing locally.
+fetch("build.json").then(r => r.ok ? r.json() : null).catch(() => null).then(b => {
+  b = b || {};
+  if (b.label) $("build").textContent = b.label;
+  if (b.title) { $("title").textContent = b.title; document.title = b.title; }
+  if (b.form_url) { $("form").href = b.form_url; $("form").hidden = false; }
+  if (!b.server) return boot({ url: "images/packaged.rootfs.cpio.gz" });
+  // Server lab: ask for the email on the page; the server answers with this
+  // student's values as a small archive, appended to the image (the kernel
+  // unpacks both), and the installer uses them instead of asking.
+  $("screen_container").hidden = true;
+  $("help").hidden = true;
+  $("help-email").hidden = true;
+  $("start").hidden = false;
+  setStatus("Waiting to start");
+  try { $("email").value = localStorage.getItem("polylab-email") || ""; } catch (e) {}
+  $("start").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    $("go").disabled = true;
+    $("start-error").textContent = "";
+    try {
+      const res = await fetch("api/session", { method: "POST", headers: { "Content-Type": "application/json" },
+                                               body: JSON.stringify({ email: $("email").value }) });
+      const info = await res.json();
+      if (!res.ok) throw new Error(info.error || "could not start the lab");
+      try { localStorage.setItem("polylab-email", info.email); } catch (e) {}
+      $("start").hidden = true;
+      $("screen_container").hidden = false;
+      $("help").hidden = false;
+      setStatus("Downloading the virtual machine…");
+      const [image, mine] = await Promise.all([download("images/packaged.rootfs.cpio.gz", true),
+                                               download(`api/vm/${info.vms[0]}.cpio.gz`, false)]);
+      const both = new Uint8Array(image.byteLength + mine.byteLength);
+      both.set(new Uint8Array(image), 0);
+      both.set(new Uint8Array(mine), image.byteLength);
+      boot({ buffer: both.buffer });
+    } catch (e) {
+      $("start").hidden = false;
+      $("screen_container").hidden = true;
+      $("go").disabled = false;
+      $("start-error").textContent = e.message;
+      setStatus("Waiting to start");
+    }
+  });
 });
 
-emulator.add_listener("download-progress", e => {
-  if (e.total) setStatus(`Downloading… ${Math.round(100 * e.loaded / e.total)}%`);
-});
-emulator.add_listener("emulator-ready", () => setStatus("Booting Linux…"));
+async function download(url, progress) {
+  const res = await fetch(url, { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`could not download ${url} (${res.status})`);
+  const total = Number(res.headers.get("Content-Length")) || 0;
+  if (!progress || !total || !res.body) return res.arrayBuffer();
+  const reader = res.body.getReader(), parts = [];
+  let loaded = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    loaded += value.byteLength;
+    setStatus(`Downloading… ${Math.round(100 * loaded / total)}%`);
+  }
+  return new Blob(parts).arrayBuffer();
+}
+
+function boot(initrd) {
+  emulator = window.emulator = new V86({
+    wasm_path: "v86/v86.wasm",
+    memory_size: 256 * 1024 * 1024,
+    vga_memory_size: 8 * 1024 * 1024,
+    screen_container: $("screen_container"),
+    bios: { url: "v86/seabios.bin" },
+    vga_bios: { url: "v86/vgabios.bin" },
+    bzimage: { url: "images/packaged.bzImage" },
+    initrd,
+    // console=ttyS0: kernel messages and the spare getty go to the (unseen)
+    // serial port, so the screen shows only the tty1 login, answered below.
+    // nomodeset: keeps bochs-drm from taking over the VGA card, which would
+    // switch the text console off and leave the screen blank.
+    cmdline: "console=ttyS0 nomodeset tsc=reliable mitigations=off random.trust_cpu=on",
+    autostart: true,
+  });
+  emulator.add_listener("download-progress", e => {
+    if (e.total) setStatus(`Downloading… ${Math.round(100 * e.loaded / e.total)}%`);
+  });
+  emulator.add_listener("emulator-ready", () => setStatus("Booting Linux…"));
+  watchLogin();
+}
 
 // Log in as root when tty1 shows its login prompt; root's .profile then runs
 // the lab installer. Rows of the text screen are tracked from
 // screen-put-char events.
+function watchLogin() {
 const rows = [];
 let loggedIn = false;
 emulator.add_listener("screen-put-char", ([row, col, chr]) => {
@@ -123,16 +198,16 @@ emulator.add_listener("screen-put-char", ([row, col, chr]) => {
     }, 300);
   }
 });
+}
 
 document.getElementById("restart").onclick = () => location.reload();
 document.getElementById("ctrlc").onclick = () => {
+  if (!emulator) return;
   // Ctrl down, C, C up, Ctrl up (PS/2 set 1 scancodes)
   emulator.keyboard_send_scancodes([0x1D, 0x2E, 0xAE, 0x9D]);
   document.getElementById("screen_container").focus();
 };
 
-// Expose for debugging in the browser console.
-window.emulator = emulator;
 </script>
 </body>
 </html>

@@ -39,7 +39,14 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "polyci.json"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 TAG = re.compile(r"^baseline-[a-z0-9-]+-[0-9a-f]{10}$")
-PIPELINE = ["scripts", "web", "tools/Dockerfile", ".github/workflows/labs.yml"]
+PIPELINE = ["scripts", "web", "server", "tools/Dockerfile", ".github/workflows/labs.yml"]
+
+
+def server_labs():
+    """Lab ids the PolyLab server (server/labs) has values for."""
+    sys.path.insert(0, str(ROOT / "server"))
+    from labs import LABS
+    return set(LABS)
 
 
 def die(msg):
@@ -240,6 +247,8 @@ def main():
             die(f"labs.{lab_id}.boot_test must be v31 or generic")
         if "levels" in lab and (not isinstance(lab["levels"], int) or lab["levels"] < 1):
             die(f"labs.{lab_id}.levels must be a positive whole number")
+        if lab.get("server") and lab_id not in server_labs():
+            die(f"labs.{lab_id}.server is set, but server/labs has no values for {lab_id}")
 
         baseline_tag = override.get(btype, baselines[btype].get("release", ""))
         release_tag = f"{lab_id}-{lab['ref'][:7]}-{baseline_tag.rsplit('-', 1)[-1]}-release" if baseline_tag else ""
@@ -271,6 +280,9 @@ def main():
             # Optional overrides; normally read from the lab's own lab.json.
             "users": lab.get("users", ""),
             "levels": str(lab.get("levels", "")),
+            # Values come from the PolyLab server: tested with a local server,
+            # and not deployed to GitHub Pages (which cannot run it).
+            "server": bool(lab.get("server")),
         })
 
     tested = {m["baseline_type"] for m in matrix if m["mode"] == "build"}

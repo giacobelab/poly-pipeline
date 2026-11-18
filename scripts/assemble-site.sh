@@ -12,6 +12,8 @@
 #   LEVELS          number of levels (shown on the landing page)
 #   LAB_JSON        the lab's lab.json, if it has one; its form_url becomes a
 #                   "Submit answers" button
+#   SERVER          1 if the lab's values come from the PolyLab server (server/):
+#                   the page asks for the email and appends the student's archive
 set -euo pipefail
 
 IMAGES=${1:?image dir}
@@ -42,10 +44,12 @@ cp "$tmp/package/LICENSE" "$OUT/v86/LICENSE-v86.txt"
 cp "$BIOS/seabios.bin" "$BIOS/vgabios.bin" "$OUT/v86/"
 cp "$BIOS/COPYING.LESSER" "$OUT/v86/COPYING.LESSER-seabios.txt"
 
-python3 - "$OUT/build.json" "${TITLE:-PolyLinux lab}" "${LABEL:-local build}" "$V86_VERSION" "${LAB_JSON:-}" "${LEVELS:-}" <<'PY'
+python3 - "$OUT/build.json" "${TITLE:-PolyLinux lab}" "${LABEL:-local build}" "$V86_VERSION" "${LAB_JSON:-}" "${LEVELS:-}" "${SERVER:-0}" <<'PY'
 import json, os, sys
-out, title, label, v86, lab_json, levels = sys.argv[1:7]
+out, title, label, v86, lab_json, levels, server = sys.argv[1:8]
 info = {"title": title, "label": label, "v86": v86}
+if server == "1":
+    info["server"] = True
 if levels:
     info["levels"] = int(levels)
 if lab_json and os.path.exists(lab_json):

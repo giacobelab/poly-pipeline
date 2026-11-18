@@ -96,6 +96,25 @@ the real page.
 tags>-release`, has `<vm>.bzImage`, `<vm>.rootfs.cpio.gz`, `<vm>.lab.cpio.gz`
 and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
 
+## Server labs (answers that are not public)
+
+Some labs get their values from the **PolyLab server** (`server/`) instead of
+working them out in the VM from public code: polylinux-basic so far. The
+server keeps a secret key and gives each student's VM only that student's
+values, so nobody can compute another student's answers from the labs'
+repositories. See [server/README.md](server/README.md) for how it works and
+how to run it.
+
+For such a lab (`"server": true` in `polyci.json`):
+- **The page** asks for the email itself, gets the student's values from the
+  server as a small archive, and appends it to the image. The lab's installer
+  uses them instead of asking.
+- **CI** tests it with a throwaway key. The QEMU boot test appends a student
+  archive, and the Chrome page test runs against the server. Both check the
+  installer uses the server's values.
+- **Its release** has `site.tar.gz`, the finished page to unpack on the
+  server. The lab is not on GitHub Pages, which can't run the server.
+
 ## `polyci.json`
 
 ```jsonc
@@ -151,6 +170,8 @@ and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
 - `baselines.<type>.from_lab` takes either `install_script` (run the lab's
   installer into the builder) or `config_dir` (copy that folder in as the
   config set).
+- `labs.<id>.server`: `true` if the lab's values come from the PolyLab server
+  (`server/labs` must know the lab).
 - `labs.<id>.subdir` is the folder that becomes `/root`; `rename` renames files
   inside it (e.g. `installbandit.sh` → `install.sh`).
 - `labs.<id>.boot_test`: `v31` checks PolyBandit 3.1 answers and screens
