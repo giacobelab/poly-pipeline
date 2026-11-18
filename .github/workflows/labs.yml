@@ -71,6 +71,8 @@ jobs:
       publish: ${{ steps.publish.outputs.publish }}
     steps:
       - uses: actions/checkout@v7
+      - name: Pipeline self-tests (lab.toml reading, layer checks)
+        run: python3 -m unittest discover -s tests -v
       - name: Plan the lab matrix
         id: plan
         env:
@@ -148,6 +150,10 @@ jobs:
       REF: ${{ matrix.ref }}
       SUBDIR: ${{ matrix.subdir }}
       RENAMES: ${{ matrix.renames }}
+      OVERLAY_DEST: ${{ matrix.overlay_dest }}
+      OVERLAY_PERMISSIONS: ${{ matrix.overlay_permissions }}
+      OVERLAY_CHECKSUMS: ${{ matrix.overlay_checksums }}
+      OVERLAY_REPLACES: ${{ matrix.overlay_replaces }}
       BASELINE_TYPE: ${{ matrix.baseline_type }}
       BASELINE_TAG: ${{ matrix.baseline_tag }}
       BASELINE_IS_OVERRIDE: ${{ matrix.baseline_is_override }}
@@ -264,8 +270,12 @@ jobs:
         if: matrix.mode == 'build'
         run: |
           mkdir -p out
+          extra=()
+          [ -z "$OVERLAY_PERMISSIONS" ] || extra+=(--permissions "$OVERLAY_PERMISSIONS")
+          [ -z "$OVERLAY_CHECKSUMS" ] || extra+=(--checksums "$OVERLAY_CHECKSUMS")
           # shellcheck disable=SC2086  # RENAMES is a list of --rename args
           python3 polyci/scripts/make-overlay.py --repo lab --ref "$REF" --subdir "$SUBDIR" \
+            --dest "${OVERLAY_DEST:-/root}" "${extra[@]}" \
             $RENAMES --out out/lab.cpio.gz --manifest out/lab-manifest.txt
           cat base/rootfs.cpio.gz out/lab.cpio.gz > out/packaged.rootfs.cpio.gz
           cp base/bzImage out/packaged.bzImage
@@ -277,7 +287,8 @@ jobs:
           python3 polyci/scripts/verify-image.py \
             --packaged out/packaged.rootfs.cpio.gz --base base/rootfs.cpio.gz \
             --lab out/lab.cpio.gz --manifest out/lab-manifest.txt \
-            --required base/manifest/required-commands.txt
+            --required base/manifest/required-commands.txt \
+            --replaces $OVERLAY_REPLACES   # the lab's overlay.replaces: space-separated paths
 
       # ---- the web page (both build and reuse) ----
       - name: v86 settings
@@ -337,6 +348,7 @@ jobs:
             export POLYLAB_KEY POLYLAB_DATA="$RUNNER_TEMP/polylab-data"
             python3 poly-server/polylab_server.py archive --lab "$LAB" --email ci-test@psu.edu \
               --out out/student.cpio.gz
+            python3 polyci/scripts/check-scenario.py out/student.cpio.gz
             scenario=(--scenario out/student.cpio.gz)
           fi
           # Tools image: wait for the background pull to finish.
@@ -397,6 +409,7 @@ jobs:
             export POLYLAB_KEY
             python3 poly-server/polylab_server.py archive --lab "$LAB" --email ci-solver@psu.edu \
               --out out/solver-scenario.cpio.gz
+            python3 polyci/scripts/check-scenario.py out/solver-scenario.cpio.gz
             scenario=(--scenario out/solver-scenario.cpio.gz)
           fi
           kvm=(); flag=
