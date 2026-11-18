@@ -64,7 +64,7 @@
     "polylinux-basic": {
       "title": "PolyLinux Basic",
       "repo": "ruffm/polylinux-basic",
-      "ref": "59bc219d1e100a756b7f98e319252acfee826b7f",
+      "ref": "3a69ead6da26fb3de540d6e88290faf8cfc14f3f",
       "subdir": ".",
       "baseline": "basic",
       "boot_test": "generic", 
