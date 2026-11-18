@@ -22,7 +22,8 @@ Each matrix entry carries everything one lab's job needs, plus a mode:
 
 The fingerprint covers everything in PolyCI that shapes a lab image, its tests
 or its page: scripts/, web/, tools/Dockerfile, the labs workflow, the v86
-settings and the lab's own polyci.json entry. Without --check-releases (the
+settings, the poly-server and poly-solver pins and the lab's own polyci.json
+entry. Without --check-releases (the
 weekly run, or a forced run) every lab with a baseline is built.
 
 A lab with "vms" (several VMs on one page, e.g. netsec-snort) goes into a
@@ -39,14 +40,33 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG = ROOT / "polyci.json"
 SHA = re.compile(r"^[0-9a-f]{40}$")
 TAG = re.compile(r"^baseline-[a-z0-9-]+-[0-9a-f]{10}$")
-PIPELINE = ["scripts", "web", "server", "tools/Dockerfile", ".github/workflows/labs.yml"]
+PIPELINE = ["scripts", "web", "tools/Dockerfile", ".github/workflows/labs.yml"]
+REPO = re.compile(r"^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$")
 
 
-def server_labs():
-    """Lab ids the PolyLab server (server/labs) has values for."""
-    sys.path.insert(0, str(ROOT / "server"))
-    from labs import LABS
-    return set(LABS)
+def private_pins(cfg, labs):
+    """The poly-server and poly-solver pins ("server", "solver" in polyci.json).
+
+    CI checks both out with deploy keys (SERVER_DEPLOY_KEY, SOLVER_DEPLOY_KEY)
+    to test labs: the server for labs with "server": true and for the solvers'
+    expected answers, the solvers for every lab they cover.
+    """
+    pins = {}
+    for name in ("server", "solver"):
+        pin = cfg.get(name)
+        if pin is None:
+            continue
+        if not isinstance(pin, dict) or not REPO.match(pin.get("repo", "")) or not SHA.match(pin.get("ref", "")):
+            die(f"{name} must be {{\"repo\": \"OWNER/REPO\", \"ref\": <full 40-character commit SHA>}}")
+        pins[name] = {"repo": pin["repo"], "ref": pin["ref"]}
+    if "solver" in pins and "server" not in pins:
+        die("solver needs server too (its expected answers come from poly-server)")
+    for lab_id, lab in labs.items():
+        if lab.get("server", False) not in (True, False):
+            die(f"labs.{lab_id}.server must be true or false (no quotes), got {labs[lab_id]['server']!r}")
+    if any(lab.get("server") for lab in labs.values()) and "server" not in pins:
+        die("a lab has \"server\": true, so polyci.json needs a \"server\" pin (poly-server)")
+    return pins
 
 
 def die(msg):
@@ -101,7 +121,7 @@ def released_fingerprint(repo, tag):
 NAME = re.compile(r"^[a-z][a-z0-9-]{0,30}$")
 
 
-def plan_group(lab_id, lab, cfg, baselines, override, pipeline, decide):
+def plan_group(lab_id, lab, cfg, baselines, override, pipeline, decide, pins):
     """Matrix entry for a lab made of several VMs on one page."""
     vms = lab["vms"]
     if not isinstance(vms, dict) or not vms:
@@ -138,7 +158,7 @@ def plan_group(lab_id, lab, cfg, baselines, override, pipeline, decide):
     base_hash = hashlib.sha256("".join(f"{t}={tags[t]}\n" for t in sorted(tags)).encode()).hexdigest()[:10]
     release_tag = "" if unpinned else f"{lab_id}-{refs_hash}-{base_hash}-release"
     fingerprint = hashlib.sha256(json.dumps(
-        {"pipeline": pipeline, "v86": cfg["v86"], "lab": lab, "baselines": tags},
+        {"pipeline": pipeline, "v86": cfg["v86"], "lab": lab, "baselines": tags, **pins},
         sort_keys=True).encode()).hexdigest()
     if unpinned:
         mode, why = "skip", f"no baseline release is pinned yet for {unpinned}"
@@ -176,6 +196,7 @@ def main():
 
     cfg = json.loads(CONFIG.read_text())
     baselines, labs = cfg["baselines"], cfg["labs"]
+    pins = private_pins(cfg, labs)
 
     override = {}
     items = [x.strip() for x in a.baseline_override.split(",") if x.strip()]
@@ -221,6 +242,10 @@ def main():
     pipeline = pipeline_digest()
     matrix, groups = [], []
 
+    blank = {"repo": "", "ref": ""}
+    private = {"server_repo": pins.get("server", blank)["repo"], "server_ref": pins.get("server", blank)["ref"],
+               "solver_repo": pins.get("solver", blank)["repo"], "solver_ref": pins.get("solver", blank)["ref"]}
+
     def decide(release_tag, fingerprint, types):
         if a.check_releases and not (set(types) & set(override)):
             found = released_fingerprint(a.check_releases, release_tag)
@@ -234,7 +259,7 @@ def main():
     for lab_id in wanted:
         lab = labs[lab_id]
         if "vms" in lab:
-            groups.append(plan_group(lab_id, lab, cfg, baselines, override, pipeline, decide))
+            groups.append(plan_group(lab_id, lab, cfg, baselines, override, pipeline, decide, pins))
             continue
         btype = lab["baseline"]
         if btype not in baselines:
@@ -247,13 +272,11 @@ def main():
             die(f"labs.{lab_id}.boot_test must be v31 or generic")
         if "levels" in lab and (not isinstance(lab["levels"], int) or lab["levels"] < 1):
             die(f"labs.{lab_id}.levels must be a positive whole number")
-        if lab.get("server") and lab_id not in server_labs():
-            die(f"labs.{lab_id}.server is set, but server/labs has no values for {lab_id}")
 
         baseline_tag = override.get(btype, baselines[btype].get("release", ""))
         release_tag = f"{lab_id}-{lab['ref'][:7]}-{baseline_tag.rsplit('-', 1)[-1]}-release" if baseline_tag else ""
         fingerprint = hashlib.sha256(json.dumps(
-            {"pipeline": pipeline, "v86": cfg["v86"], "lab": lab, "baseline": baseline_tag},
+            {"pipeline": pipeline, "v86": cfg["v86"], "lab": lab, "baseline": baseline_tag, **pins},
             sort_keys=True).encode()).hexdigest()
 
         if not baseline_tag:
@@ -283,6 +306,7 @@ def main():
             # Values come from the PolyLab server: tested with a local server,
             # and not deployed to GitHub Pages (which cannot run it).
             "server": bool(lab.get("server")),
+            **private,
         })
 
     tested = {m["baseline_type"] for m in matrix if m["mode"] == "build"}

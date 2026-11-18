@@ -98,12 +98,12 @@ and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
 
 ## Server labs (answers that are not public)
 
-Some labs get their values from the **PolyLab server** (`server/`) instead of
-working them out in the VM from public code: polylinux-basic so far. The
-server keeps a secret key and gives each student's VM only that student's
-values, so nobody can compute another student's answers from the labs'
-repositories. See [server/README.md](server/README.md) for how it works and
-how to run it.
+Some labs get their values from the **PolyLab server** instead of working them
+out in the VM from public code: polylinux-basic so far. The server keeps a
+secret key and gives each student's VM only that student's values, so nobody
+can compute another student's answers from the labs' repositories. It lives in
+the private repo **Giacobelab/poly-server** (its README says how it works and
+how to run it); CI checks it out at the commit pinned in `polyci.json`.
 
 For such a lab (`"server": true` in `polyci.json`):
 - **The page** asks for the email itself, gets the student's values from the
@@ -115,12 +115,35 @@ For such a lab (`"server": true` in `polyci.json`):
 - **Its release** has `site.tar.gz`, the finished page to unpack on the
   server. The lab is not on GitHub Pages, which can't run the server.
 
+## Reference solvers (poly-solver)
+
+Every lab build also plays the image with the lab's **reference solvers**,
+from the private repo **Giacobelab/poly-solver**, pinned in `polyci.json`.
+Each level's solver is typed into the VM over its console, run as that
+level's user and deleted. Its answer must equal what poly-server says a
+correct student submits (`polylab_server.py expected`), with a throwaway key
+for a server lab, or the lab's public defaults otherwise. So a lab is only
+released when every level can be solved and every answer will be graded
+right. A lab with no solvers yet gets a notice, not a failure.
+
+The step's output names levels only, and it keeps no console log, so the
+public run logs show neither answers nor solvers. The release jobs never
+check poly-solver out.
+
+**Access:** both repos are read with deploy keys, stored here as the
+repository secrets `SERVER_DEPLOY_KEY` and `SOLVER_DEPLOY_KEY` (each the
+private half of a read-only deploy key on that repo). Pull requests from
+forks get no secrets, so they can't run these tests; branches in this repo
+can.
+
 ## `polyci.json`
 
 ```jsonc
 {
   "builder":   { "repo": "ruffm/buildroot-builder2", "ref": "<sha>", "buildroot_version": "2025.02.15" },
   "v86":       { "npm_version": "0.5.473", "bios_repo": "copy/v86", "bios_ref": "<sha>" },
+  "server":    { "repo": "Giacobelab/poly-server", "ref": "<sha>" },
+  "solver":    { "repo": "Giacobelab/poly-solver", "ref": "<sha>" },
   "baselines": {
     "basic":      { "config_set": "basic", "release": "" },
     "filesystem": { "config_set": "basic-compression", "release": "baseline-filesystem-<hash>" },
@@ -146,6 +169,10 @@ For such a lab (`"server": true` in `polyci.json`):
   prebuilt i686 toolchain (instead of compiling GCC and glibc every build). Once Nick
   merges them, point `repo` and `ref` back at his repository. If the merged
   files are the same, the baseline tags stay the same.
+- `server` and `solver` pin the private poly-server and poly-solver repos
+  (full commit SHAs). `server` is required once a lab has `"server": true`;
+  `solver` needs `server` (for the expected answers). Moving either pin
+  retests every lab.
 - `baselines.<type>.config_set` is a builder config set, or one a lab repo
   provides (`from_lab`: PolyCI runs that repo's install script into the
   builder, as Nick Giacobe's instructions say).
@@ -170,8 +197,8 @@ For such a lab (`"server": true` in `polyci.json`):
 - `baselines.<type>.from_lab` takes either `install_script` (run the lab's
   installer into the builder) or `config_dir` (copy that folder in as the
   config set).
-- `labs.<id>.server`: `true` if the lab's values come from the PolyLab server
-  (`server/labs` must know the lab).
+- `labs.<id>.server`: `true` (no quotes) if the lab's values come from the
+  PolyLab server (poly-server's `labs/` must know the lab).
 - `labs.<id>.subdir` is the folder that becomes `/root`; `rename` renames files
   inside it (e.g. `installbandit.sh` → `install.sh`).
 - `labs.<id>.boot_test`: `v31` checks PolyBandit 3.1 answers and screens
@@ -202,13 +229,14 @@ however many labs there are.
 
 | Mode | When | What runs | Time |
 |---|---|---|---|
-| `build` | new lab commit or baseline, PolyCI's pipeline changed, weekly run, or **force** | overlay, join, image check, then boot test (QEMU) and page test (Chrome) in parallel; publish on `main` | minutes |
+| `build` | new lab commit or baseline, PolyCI's pipeline changed, weekly run, or **force** | overlay, join, image check, then boot test (QEMU) and page test (Chrome) in parallel, then the reference solvers; publish on `main` | minutes |
 | `reuse` | `<lab>-<commit>-<hash>-release` exists and was made by this exact pipeline | download the released images, rebuild the page | seconds |
 | `skip` | no baseline pinned for the lab's type | nothing | — |
 
 "This exact pipeline" is a fingerprint, recorded in each release's
 `release.json`, of `scripts/`, `web/`, `tools/Dockerfile`, `labs.yml`, the v86
-settings and the lab's `polyci.json` entry. Change any of them and affected
+settings, the poly-server and poly-solver pins and the lab's `polyci.json`
+entry. Change any of them and affected
 labs rebuild and retest. Packaging is reproducible, so if the rebuilt images
 are byte-identical, the existing release just gets the new fingerprint; a
 release's images are never replaced.

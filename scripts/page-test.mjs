@@ -6,7 +6,7 @@
 // For a lab whose values come from the PolyLab server (build.json "server"),
 // the email goes into the page's start form instead, the installer must not
 // ask for it, and the first level's README must name it. Serve the site with
-// server/polylab_server.py for that.
+// poly-server's polylab_server.py for that.
 // Usage: node page-test.mjs <url> <screenshot-dir> [user-pattern, e.g. "level{n}"]
 import puppeteer from "puppeteer-core";
 import fs from "node:fs";

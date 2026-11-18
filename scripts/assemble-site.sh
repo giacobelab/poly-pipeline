@@ -12,7 +12,7 @@
 #   LEVELS          number of levels (shown on the landing page)
 #   LAB_JSON        the lab's lab.json, if it has one; its form_url becomes a
 #                   "Submit answers" button
-#   SERVER          1 if the lab's values come from the PolyLab server (server/):
+#   SERVER          1 if the lab's values come from the PolyLab server (poly-server):
 #                   the page asks for the email and appends the student's archive
 set -euo pipefail
 

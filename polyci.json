@@ -10,6 +10,8 @@
     "bios_repo": "copy/v86",
     "bios_ref": "315b2b0b758703ef0e6cc7b4088d6068f83f3c20"
   },
+  "server": { "repo": "Giacobelab/poly-server", "ref": "ee5f414df655f049649257d7eeb4e63651287e74" },
+  "solver": { "repo": "Giacobelab/poly-solver", "ref": "6fc1031a78e87ccca709763a02dcfd5eb91058f4" },
   "baselines": {
     "basic": {
       "description": "Basic shell commands (builder config set 'basic')",

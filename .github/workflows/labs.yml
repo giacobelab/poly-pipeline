@@ -186,6 +186,43 @@ jobs:
           ref: ${{ matrix.ref }}
           path: lab
 
+      # poly-server and poly-solver are private: read-only deploy keys, as the
+      # repository secrets SERVER_DEPLOY_KEY and SOLVER_DEPLOY_KEY. Runs without
+      # secrets (pull requests from forks) cannot test with them.
+      - name: Access to poly-server and poly-solver
+        if: matrix.mode == 'build' && (matrix.server_repo != '' || matrix.solver_repo != '')
+        env:
+          SERVER_KEY: ${{ secrets.SERVER_DEPLOY_KEY }}
+          SOLVER_KEY: ${{ secrets.SOLVER_DEPLOY_KEY }}
+          NEED_SERVER: ${{ matrix.server_repo != '' }}
+          NEED_SOLVER: ${{ matrix.solver_repo != '' }}
+        run: |
+          missing=()
+          [ "$NEED_SERVER" != true ] || [ -n "$SERVER_KEY" ] || missing+=(SERVER_DEPLOY_KEY)
+          [ "$NEED_SOLVER" != true ] || [ -n "$SOLVER_KEY" ] || missing+=(SOLVER_DEPLOY_KEY)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::This run has no ${missing[*]} (a pull request from a fork gets no secrets), so it cannot check out the private poly-server/poly-solver repos to test $LAB."
+            exit 1
+          fi
+
+      - name: Check out ${{ matrix.server_repo }} @ ${{ matrix.server_ref }}
+        if: matrix.mode == 'build' && matrix.server_repo != ''
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.server_repo }}
+          ref: ${{ matrix.server_ref }}
+          ssh-key: ${{ secrets.SERVER_DEPLOY_KEY }}
+          path: poly-server
+
+      - name: Check out ${{ matrix.solver_repo }} @ ${{ matrix.solver_ref }}
+        if: matrix.mode == 'build' && matrix.solver_repo != ''
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ matrix.solver_repo }}
+          ref: ${{ matrix.solver_ref }}
+          ssh-key: ${{ secrets.SOLVER_DEPLOY_KEY }}
+          path: poly-solver
+
       - name: Level settings (from the lab's lab.json)
         if: matrix.mode != 'skip'
         id: settings
@@ -293,12 +330,12 @@ jobs:
         run: |
           # A lab whose values come from the PolyLab server is tested with a
           # throwaway key: the boot test appends a student archive made with
-          # it, and the page test runs against server/polylab_server.py.
+          # it, and the page test runs against poly-server/polylab_server.py.
           scenario=()
           if [ "$SERVER" = true ]; then
-            POLYLAB_KEY=$(python3 polyci/server/polylab_server.py new-key)
+            POLYLAB_KEY=$(python3 poly-server/polylab_server.py new-key)
             export POLYLAB_KEY POLYLAB_DATA="$RUNNER_TEMP/polylab-data"
-            python3 polyci/server/polylab_server.py archive --lab "$LAB" --email ci-test@psu.edu \
+            python3 poly-server/polylab_server.py archive --lab "$LAB" --email ci-test@psu.edu \
               --out out/student.cpio.gz
             scenario=(--scenario out/student.cpio.gz)
           fi
@@ -319,7 +356,7 @@ jobs:
           cp polyci/scripts/page-test.mjs "$pt/"
           if [ "$SERVER" = true ]; then
             mkdir -p siteroot && cp -r site "siteroot/$LAB"
-            python3 polyci/server/polylab_server.py serve --site siteroot --port 8080 > out/server.log 2>&1 &
+            python3 poly-server/polylab_server.py serve --site siteroot --port 8080 > out/server.log 2>&1 &
             url="http://127.0.0.1:8080/$LAB/"
           else
             python3 -m http.server 8080 --directory site --bind 127.0.0.1 >/dev/null 2>&1 &
@@ -337,6 +374,36 @@ jobs:
           grep -h '^::error::' out/boot-test.txt out/page-test.txt || true
           echo "boot test: $([ $b = 0 ] && echo passed || echo FAILED)   page test: $([ $p = 0 ] && echo passed || echo FAILED)"
           [ "$b" = 0 ] && [ "$p" = 0 ]
+
+      # Every level solved by poly-solver's reference solver, and every answer
+      # equal to what poly-server will grade. The solvers are typed into the VM
+      # over its console and deleted; they never go into an image or a release.
+      # The output names levels only. There is deliberately no console log:
+      # it would show the answers and the solvers.
+      - name: Reference solvers (poly-solver)
+        if: matrix.mode == 'build' && matrix.solver_repo != ''
+        timeout-minutes: 30
+        env:
+          SERVER: ${{ matrix.server }}
+        run: |
+          if [ ! -f "poly-solver/labs/$LAB/solver.toml" ]; then
+            echo "::notice::$LAB has no reference solvers in poly-solver yet; not checked."
+            exit 0
+          fi
+          scenario=()
+          if [ "$SERVER" = true ]; then
+            # Its own throwaway key: the archive and the expected answers both come from it.
+            POLYLAB_KEY=$(python3 poly-server/polylab_server.py new-key)
+            export POLYLAB_KEY
+            python3 poly-server/polylab_server.py archive --lab "$LAB" --email ci-solver@psu.edu \
+              --out out/solver-scenario.cpio.gz
+            scenario=(--scenario out/solver-scenario.cpio.gz)
+          fi
+          kvm=(); flag=
+          if [ -e /dev/kvm ]; then kvm=(--device /dev/kvm); flag=--kvm; fi
+          docker run --rm "${kvm[@]}" -e POLYLAB_KEY -v "$PWD:/w" -w /w "$TOOLS_IMAGE" \
+            python3 poly-solver/run.py --lab "$LAB" --kernel out/packaged.bzImage \
+              --initrd out/packaged.rootfs.cpio.gz --server poly-server $flag "${scenario[@]}"
 
       - name: Upload test logs and screenshots
         if: always() && matrix.mode == 'build'
@@ -381,7 +448,7 @@ jobs:
           files=(packaged.bzImage packaged.rootfs.cpio.gz lab.cpio.gz lab-manifest.txt release.json)
           if [ "$SERVER" = true ]; then
             # Server labs are not on GitHub Pages: the finished page goes in the
-            # release, to unpack on the PolyLab server (see server/README.md).
+            # release, to unpack on the PolyLab server (see the poly-server README).
             tar -czf dist/site.tar.gz -C site .
             files+=(site.tar.gz)
           fi
@@ -435,7 +502,7 @@ jobs:
           Boot \`packaged.bzImage\` with \`packaged.rootfs.cpio.gz\` as the initrd (v86 or QEMU).
           EOF
           if [ -f dist/site.tar.gz ]; then
-            printf '\nThis lab gets its values from the PolyLab server: unpack `site.tar.gz` into the\nserver site folder `%s/` (see server/README.md). It is not on GitHub Pages.\n' "$LAB" >> notes.md
+            printf '\nThis lab gets its values from the PolyLab server: unpack `site.tar.gz` into the\nserver site folder `%s/` (see the poly-server README). It is not on GitHub Pages.\n' "$LAB" >> notes.md
           fi
           extra=(); [ ! -f dist/site.tar.gz ] || extra=(dist/site.tar.gz)
           gh release create "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --latest=false \
