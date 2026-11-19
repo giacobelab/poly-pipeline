@@ -57,7 +57,7 @@
     "polybandit3.1": {
       "title": "PolyBandit 3.1",
       "repo": "ruffm/polybandit3.1",
-      "ref": "5c37e6da3db2a1e1814066d407d6da12a204e5cb",
+      "ref": "9e4f6eb41fde50ad99af7483100105a7abbc6c47",
       "subdir": ".",
       "baseline": "filesystem",
       "self_test": "test.sh",
@@ -67,7 +67,7 @@
     "polylinux-basic": {
       "title": "PolyLinux Basic",
       "repo": "ruffm/polylinux-basic",
-      "ref": "3a69ead6da26fb3de540d6e88290faf8cfc14f3f",
+      "ref": "479836dac655ee039584d24371fc667484e77205",
       "subdir": ".",
       "baseline": "basic",
       "boot_test": "generic", 
