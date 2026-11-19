@@ -4,7 +4,8 @@ repo's default branch, and describe what changed.
 
   bump-labs.py [--body FILE] [--github-output FILE]
 
-Only labs.<id>.ref (or labs.<id>.vms.<vm>.ref) is changed. The builder and from_lab baseline configs are
+Only labs.<id>.ref and labs.<id>.vms.<vm>.ref are changed (a lab described by
+its lab.toml has both: the lab's own repo, and any VMs from other repos). The builder and from_lab baseline configs are
 checked too, but only reported: moving them means building and promoting a
 new baseline, which should be a deliberate step.
 Writes changed=true|false (and the PR body) for GitHub Actions.
@@ -33,8 +34,9 @@ def main():
     bumped, notes, problems = [], [], []
 
     for lab_id, lab in cfg["labs"].items():
-        # A multi-VM lab pins one repo per VM; each is moved on its own.
-        targets = [(f"{lab_id}/{n}", v) for n, v in lab["vms"].items()] if "vms" in lab else [(lab_id, lab)]
+        # The lab's own repo (if it has one), and each VM's repo (if pinned): each moves on its own.
+        targets = [(lab_id, lab)] if "repo" in lab else []
+        targets += [(f"{lab_id}/{n}", v) for n, v in lab.get("vms", {}).items() if "repo" in v]
         for label, entry in targets:
             new = head(entry["repo"])
             if new is None:

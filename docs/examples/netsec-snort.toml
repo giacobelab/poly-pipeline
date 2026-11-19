@@ -1,0 +1,40 @@
+# What the PolyLab pipeline needs to know to build and test this lab.
+# The format: https://github.com/Giacobelab/poly-pipeline/blob/main/docs/lab-toml.md
+#
+# This lab is three VMs on one page. This file lives in the defender's repo,
+# which is the VM students see; the attacker and noise VMs come from their own
+# repos, pinned in the pipeline's polyci.json.
+schema = 1
+id = "netsec-snort"
+title = "Snort Incident Response"
+
+[overlay]
+# In every VM's repo, rootfs-overlay/ is laid over the image's root, with the
+# modes and owners in permissions.txt, after checking SHA256SUMS.
+folder = "rootfs-overlay"
+dest = "/"
+permissions = "permissions.txt"
+checksums = "SHA256SUMS"
+# Baseline files the overlays replace on purpose (anything else is an error).
+replaces = ["/etc/hostname", "/etc/init.d/S45connman", "/etc/inittab", "/etc/issue",
+            "/etc/network/interfaces"]
+
+[test]
+# All three VMs on one network: services up, traffic seen on the defender.
+boot = "netsec-snort"
+
+[[vm]]
+name = "defender"
+baseline = "snort-defender"
+memory_mb = 256
+visible = true
+
+[[vm]]
+name = "attacker"
+baseline = "snort-attacker"
+memory_mb = 256
+
+[[vm]]
+name = "noise"
+baseline = "snort-attacker"
+memory_mb = 256
