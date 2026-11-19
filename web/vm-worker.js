@@ -1,8 +1,13 @@
-// One hidden VM of a multi-VM lab page, in its own Web Worker so it runs on
-// its own CPU core instead of sharing the page's thread with the visible VM.
+// One hidden VM of a lab page with several VMs, in its own Web Worker so it
+// runs on its own CPU core instead of sharing the page's thread with the
+// visible VM.
 //
 // Messages from the page:
-//   {type: "start", vm: {...}, cmdline}   boot the VM (no screen, keyboard or sound)
+//   {type: "start", vm: {...}, cmdline, initrd: [url, ...]}
+//                                         boot the VM (no screen, keyboard or
+//                                         sound); the initrd is those files
+//                                         joined end to end (the image, then
+//                                         the student's archive for a server lab)
 //   {type: "net", frame}                  an Ethernet frame for this VM's NIC
 // Messages to the page:
 //   {type: "net", frame}                  a frame this VM sent
@@ -17,10 +22,21 @@ importScripts("v86/libv86.js");
 let emulator = null;
 let line = "";
 
-self.onmessage = ({ data }) => {
+async function joined(urls) {
+  const parts = await Promise.all(urls.map(async url => {
+    const res = await fetch(url, { credentials: "same-origin" });
+    if (!res.ok) throw new Error(`could not download ${url} (${res.status})`);
+    return res.arrayBuffer();
+  }));
+  return new Blob(parts).arrayBuffer();
+}
+
+self.onmessage = async ({ data }) => {
   if (data.type === "start" && !emulator) {
     const vm = data.vm;
     postMessage({ type: "state", state: "downloading" });
+    const urls = data.initrd || ["images/" + vm.initrd];
+    const initrd = urls.length === 1 ? { url: urls[0] } : { buffer: await joined(urls) };
     emulator = new V86({
       wasm_path: "v86/v86.wasm",
       memory_size: vm.memory_mb * 1024 * 1024,
@@ -28,7 +44,7 @@ self.onmessage = ({ data }) => {
       bios: { url: "v86/seabios.bin" },
       vga_bios: { url: "v86/vgabios.bin" },
       bzimage: { url: "images/" + vm.bzimage },
-      initrd: { url: "images/" + vm.initrd },
+      initrd,
       cmdline: data.cmdline,
       disable_keyboard: true,
       disable_mouse: true,

@@ -375,7 +375,7 @@ jobs:
             url="http://127.0.0.1:8080/"
           fi
           sleep 1
-          node "$pt/page-test.mjs" "$url" out/page-shots "$USERS" > out/page-test.txt 2>&1 &
+          node "$pt/page-test.mjs" "$url" out/page-shots --users "$USERS" > out/page-test.txt 2>&1 &
           page=$!
 
           b=0; wait "$boot" || b=$?
@@ -597,11 +597,13 @@ jobs:
           sparse-checkout: bios
           sparse-checkout-cone-mode: false
 
-      - name: Assemble the multi-VM page
+      - name: Assemble the page
         if: matrix.mode != 'skip'
         env:
           V86_VERSION: ${{ steps.v86.outputs.version }}
           LABEL: ${{ matrix.release_tag }}
+          # The lab's scripts read the student's identity from the kernel command line.
+          IDENTITY: polylab
         run: bash polyci/scripts/assemble-site.sh out v86src/bios site
 
       - name: Cache the page test's browser driver
@@ -619,6 +621,8 @@ jobs:
       - name: Boot test (QEMU, all VMs on one network) and page test (Chrome), in parallel
         if: matrix.mode == 'build'
         timeout-minutes: 40
+        env:
+          BOOT_TEST: ${{ matrix.boot_test }}
         run: |
           while [ ! -f "$RUNNER_TEMP/pull.rc" ]; do sleep 1; done
           [ "$(cat "$RUNNER_TEMP/pull.rc")" = 0 ] || { cat "$RUNNER_TEMP/pull.log"; echo "::error::could not pull $TOOLS_IMAGE"; exit 1; }
@@ -627,14 +631,14 @@ jobs:
           echo "KVM: ${flag:-not available, using emulation}"
 
           docker run --rm "${kvm[@]}" -v "$PWD:/w" -w /w "$TOOLS_IMAGE" \
-            python3 polyci/scripts/boot-test-multi.py --images out --log-dir out $flag \
+            python3 polyci/scripts/boot-test.py --flavor "$BOOT_TEST" --images out --log-dir out $flag \
             > out/boot-test.txt 2>&1 &
           boot=$!
 
           pt=~/.cache/polyci-page-test
-          cp polyci/scripts/page-test-multi.mjs "$pt/"
+          cp polyci/scripts/page-test.mjs "$pt/"
           python3 -m http.server 8080 --directory site --bind 127.0.0.1 >/dev/null 2>&1 &
-          node "$pt/page-test-multi.mjs" http://127.0.0.1:8080/ out/page-shots > out/page-test.txt 2>&1 &
+          node "$pt/page-test.mjs" http://127.0.0.1:8080/ out/page-shots > out/page-test.txt 2>&1 &
           page=$!
 
           b=0; wait "$boot" || b=$?

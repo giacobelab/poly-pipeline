@@ -74,7 +74,8 @@ generate traffic in the background. They need:
 - **One identity**: every VM gets the same `polylab_email_hex`, `polylab_date`
   and `polylab_code` on its kernel command line.
 
-**The page** (`web/multi.html`) asks for the email once and starts the
+**The page** is the same `web/index.html` every lab uses (see "One page,
+one harness" below). For this lab it asks for the email once and starts the
 defender on the page, with the screen and keyboard. Each hidden VM runs in its
 own Web Worker (`web/vm-worker.js`), so it gets its own CPU core, and starts a
 few seconds after the one before it. The page passes every Ethernet frame a VM
@@ -84,17 +85,28 @@ its card stays `eth0` (the Snort baselines use udev, which would rename it to
 are not connected. The exercise date is today, unless the link sets
 `?date=YYYY-MM-DD` (e.g. for a whole class).
 
-**The tests**: `boot-test-multi.py` boots all the VMs in QEMU on one network
-(joined by a small hub in the script). It checks that each VM logs in and
+**The tests**: `boot-test.py --flavor netsec-snort --images DIR` boots all
+the VMs in QEMU on one network (joined by a small hub in the script). It checks that each VM logs in and
 shows its memory, that frames flow from every VM, and that the defender has
 its address, sees at least two other hosts, and got the email. With tcpdump
 in the image, it also checks the defender captures packets from at least
-three other addresses. `page-test-multi.mjs` does the same in Chrome through
-the real page.
+three other addresses. `page-test.mjs` does the same in Chrome through the
+real page.
 
 **The release**, `<lab>-<7 hex of the VM commits>-<10 hex of the baseline
 tags>-release`, has `<vm>.bzImage`, `<vm>.rootfs.cpio.gz`, `<vm>.lab.cpio.gz`
 and `<vm>.lab-manifest.txt` for each VM, plus `release.json` and `SHA256SUMS`.
+
+## One page, one harness
+
+Every lab, with one VM or several, uses the same files:
+
+| File | What it does |
+|---|---|
+| `web/index.html` | The lab page. It reads `images/vms.json` (the VMs: name, images, memory, which one is visible) and `build.json`, which says how the lab gets its values: `"server": true` (the page asks for the email and appends each VM's archive from poly-server), `"identity": "polylab"` (the page asks for the email and puts it on each VM's kernel command line), or neither (the lab's installer asks). The visible VM runs on the page; any others run in Web Workers (`web/vm-worker.js`), joined by an in-page Ethernet hub. |
+| `scripts/assemble-site.sh` | Builds a lab's site around that page. It writes `images/vms.json` for a one-VM lab. |
+| `scripts/boot-test.py` | Boots the images in QEMU. `--flavor` says what to check: `v31`, `generic` (one VM, levels by `whoami`, with `--scenario` for a server lab), or `netsec-snort` (several VMs on one network, with `--images DIR`). |
+| `scripts/page-test.mjs` | Plays the real page in headless Chrome. It reads the page's `vms.json` and `build.json` and checks what applies: the levels for a one-VM lab (`--users level{n}`), or every VM up, on one network and with the identity for a lab with several. |
 
 ## Server labs (answers that are not public)
 
@@ -349,7 +361,9 @@ python3 scripts/boot-test.py --flavor v31 --kernel bzImage --initrd packaged.roo
 
 The boot test needs `qemu-system-i386` and `python3-pexpect`. For a multi-VM
 lab, `scripts/group.py build` makes the images (it needs `gh`), and
-`scripts/boot-test-multi.py --images out` tests them.
+`scripts/boot-test.py --flavor netsec-snort --images out` tests them. The page
+test needs Node, `puppeteer-core` and Chrome:
+`node scripts/page-test.mjs http://127.0.0.1:8080/ shots --users level{n}`.
 
 ## Contributing, security and license
 

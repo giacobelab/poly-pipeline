@@ -3,28 +3,41 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PolyLinux lab</title>
+<title>PolyLab</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0d10'/%3E%3Ctext x='5' y='23' font-family='monospace' font-size='18' fill='%234fb3ff'%3E%3E_%3C/text%3E%3C/svg%3E">
 <style>
-  :root { --bg: #0b0d10; --panel: #14181d; --text: #d7dde4; --muted: #8b96a3; --accent: #4fb3ff; --ok: #5fd38d; --warn: #f2c14e; }
+  :root { --bg: #0b0d10; --panel: #14181d; --text: #d7dde4; --muted: #8b96a3; --accent: #4fb3ff; --ok: #5fd38d; --warn: #f2c14e; --bad: #ff6b6b; }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
     padding: 14px 20px; border-bottom: 1px solid #222a33; background: var(--panel); }
   h1 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: .2px; }
-  h1 span { color: var(--accent); }
   #status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
-  #status i { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); display: inline-block; }
-  #status.ready i { background: var(--ok); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #3a434e; display: inline-block; flex: none; }
+  .dot.busy { background: var(--warn); }
+  .dot.ok { background: var(--ok); }
+  .dot.bad { background: var(--bad); }
+  #vms { display: flex; gap: 12px; color: var(--muted); font-size: 13px; }
+  #vms span { display: inline-flex; align-items: center; gap: 6px; }
   .spacer { flex: 1; }
-  button { font: inherit; font-size: 14px; color: var(--text); background: #1d232b;
+  button, a.button { font: inherit; font-size: 14px; color: var(--text); background: #1d232b; text-decoration: none;
     border: 1px solid #2c3540; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
   button:hover, a.button:hover { border-color: var(--accent); }
-  a.button { font-size: 14px; color: var(--text); background: #1d232b; text-decoration: none;
-    border: 1px solid #2c3540; border-radius: 6px; padding: 6px 12px; }
-  a.button[hidden] { display: none; }
+  button:disabled { opacity: .5; cursor: default; }
+  [hidden] { display: none !important; }
   main { display: flex; flex-direction: column; align-items: center; padding: 20px; gap: 12px; }
+  #start { max-width: 520px; width: 100%; background: var(--panel); border: 1px solid #222a33;
+    border-radius: 10px; padding: 22px; margin-top: 24px; }
+  #start h2 { margin: 0 0 6px; font-size: 17px; }
+  #start p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+  #start label { display: block; font-size: 14px; margin-bottom: 6px; }
+  #start input { width: 100%; font: inherit; color: var(--text); background: #0f1317; border: 1px solid #2c3540;
+    border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; }
+  #start input:focus { outline: none; border-color: var(--accent); }
+  #start .row { display: flex; align-items: center; gap: 12px; }
+  #start .note { margin: 12px 0 0; font-size: 13px; }
+  #email-error { color: var(--bad); font-size: 13px; }
   #screen_container { background: #000; padding: 6px; border-radius: 6px;
     box-shadow: 0 0 0 1px #222a33, 0 10px 30px rgba(0,0,0,.45); outline: none; }
   #screen_container:focus-within, #screen_container:focus { box-shadow: 0 0 0 2px var(--accent); }
@@ -34,48 +47,37 @@
   #help code { color: var(--text); background: #1d232b; padding: 1px 5px; border-radius: 4px; }
   footer { color: #5d6875; font-size: 12px; text-align: center; padding: 8px 0 20px; }
   footer a { color: inherit; }
-  [hidden] { display: none !important; }
-  #start { max-width: 520px; width: 100%; background: var(--panel, #14181d); border: 1px solid #222a33;
-    border-radius: 10px; padding: 22px; margin-top: 24px; }
-  #start h2 { margin: 0 0 6px; font-size: 17px; }
-  #start p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
-  #start label { display: block; font-size: 14px; margin-bottom: 6px; }
-  #start input { width: 100%; box-sizing: border-box; font: inherit; color: var(--text); background: #0f1317;
-    border: 1px solid #2c3540; border-radius: 6px; padding: 8px 10px; margin-bottom: 12px; }
-  #start .row { display: flex; align-items: center; gap: 12px; }
-  #start-error { color: #ff6b6b; font-size: 13px; }
 </style>
 </head>
 <body>
 <header>
-  <h1 id="title">PolyLinux lab</h1>
-  <div id="status"><i></i><span id="status-text">Downloading the virtual machine…</span></div>
+  <h1 id="title">PolyLab</h1>
+  <div id="status"><i class="dot busy"></i><span id="status-text">Loading…</span></div>
+  <div id="vms" aria-label="Virtual machines" hidden></div>
   <div class="spacer"></div>
   <a id="form" class="button" href="#" target="_blank" rel="noopener" hidden>Submit answers</a>
-  <button id="ctrlc" title="Send Ctrl+C to the terminal">Ctrl+C</button>
-  <button id="restart" title="Start over with a fresh machine (your progress is lost)">Restart</button>
+  <button id="ctrlc" title="Send Ctrl+C to the terminal" disabled>Ctrl+C</button>
+  <button id="restart" title="Start over with fresh machines (your progress is lost)">Restart</button>
 </header>
 <main>
-  <!-- Labs whose values come from the PolyLab server ask for the email here. -->
-  <form id="start" hidden>
+  <!-- Labs whose values depend on the student's email ask for it here. -->
+  <form id="start" autocomplete="on" hidden>
     <h2>Start the lab</h2>
-    <p>Your levels are generated for your email address, so use your Penn State email.</p>
+    <p id="start-text">Your lab is generated for your email address, so use your Penn State email.</p>
     <label for="email">Email</label>
     <input id="email" name="email" type="email" required placeholder="abc123@psu.edu" autocomplete="email">
     <div class="row">
       <button id="go" type="submit">Start</button>
-      <span id="start-error" role="alert"></span>
+      <span id="email-error" role="alert"></span>
     </div>
+    <p class="note" id="exercise" hidden></p>
+    <p class="note" id="cores" hidden>This computer reports fewer than four processor cores, so the lab may run slowly.</p>
   </form>
-  <div id="screen_container" tabindex="0">
+  <div id="screen_container" tabindex="0" hidden>
     <div></div>
     <canvas></canvas>
   </div>
-  <p id="help">
-    Click the terminal and type<span id="help-email">. Enter your Penn State email when asked,
-    then follow the instructions on screen</span>. Use <code>nextlevel</code> and <code>prevlevel</code> to move between levels.
-    Everything runs in your browser; reloading the page starts over.
-  </p>
+  <p id="help" hidden></p>
 </main>
 <footer>
   Build <span id="build">dev</span> · runs on <a href="https://github.com/copy/v86">v86</a>
@@ -84,58 +86,121 @@
 <script src="v86/libv86.js"></script>
 <script>
 "use strict";
-const statusEl = document.getElementById("status");
-const statusText = document.getElementById("status-text");
-const setStatus = (text, ready) => { statusText.textContent = text; statusEl.classList.toggle("ready", !!ready); };
-const $ = id => document.getElementById(id);
-let emulator = null;
+// One page for every PolyLab lab, with one VM or several.
+//
+// images/vms.json lists the VMs ({name, bzimage, initrd, memory_mb, visible});
+// build.json (written by CI) says how the lab gets its values:
+//   server: true       the PolyLab server makes each student's values: the page
+//                      asks for the email, starts a session, and appends
+//                      api/vm/<vm>.cpio.gz to each VM's image (the kernel
+//                      unpacks both)
+//   identity: "polylab" the lab's scripts derive their values from an identity
+//                      on the kernel command line (polylab_email_hex,
+//                      polylab_date, polylab_code), which the page builds from
+//                      the email it asks for
+//   neither            the lab's installer asks for the email itself
+//
+// The visible VM runs on this page's thread (it owns the screen and keyboard);
+// every hidden VM runs in its own Web Worker (vm-worker.js), so each gets its
+// own CPU core. All VMs share one Ethernet segment: the page passes every frame
+// one VM sends to all the others (a hub). Nothing leaves the page.
 
-// build.json is written by CI (title, release, grading form, whether the
-// lab's values come from the PolyLab server); absent when testing locally.
-fetch("build.json").then(r => r.ok ? r.json() : null).catch(() => null).then(b => {
-  b = b || {};
-  if (b.label) $("build").textContent = b.label;
-  if (b.title) { $("title").textContent = b.title; document.title = b.title; }
-  if (b.form_url) { $("form").href = b.form_url; $("form").hidden = false; }
-  if (!b.server) return boot({ url: "images/packaged.rootfs.cpio.gz" });
-  // Server lab: ask for the email on the page; the server answers with this
-  // student's values as a small archive, appended to the image (the kernel
-  // unpacks both), and the installer uses them instead of asking.
-  $("screen_container").hidden = true;
-  $("help").hidden = true;
-  $("help-email").hidden = true;
-  $("start").hidden = false;
-  setStatus("Waiting to start");
+// net.ifnames=0 keeps the NIC named eth0 on images built with udev.
+// console=ttyS0: kernel messages and the spare getty go to the (unseen) serial
+// port, so the screen shows only the tty1 login, answered below.
+// nomodeset: keeps bochs-drm from switching the text console off.
+const BASE_CMDLINE = "console=ttyS0 nomodeset tsc=reliable mitigations=off random.trust_cpu=on net.ifnames=0";
+const STAGGER_MS = 4000;   // start hidden VMs one by one, after the visible VM
+
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, "0");
+const statusDot = $("status").querySelector(".dot");
+const setStatus = (text, kind) => { $("status-text").textContent = text; statusDot.className = "dot " + (kind || "busy"); };
+
+// Exposed for the CI page test and for debugging in the browser console.
+const polylab = window.polylab = { state: {}, frames: {}, serial: {}, errors: [], cmdline: "", vms: [] };
+
+const HELP_LEVELS = "Click the terminal and type. Use <code>nextlevel</code> and <code>prevlevel</code> to move between levels. Everything runs in your browser; reloading the page starts over.";
+const HELP_ASK = "Click the terminal and type. Enter your Penn State email when asked, then follow the instructions on screen. Use <code>nextlevel</code> and <code>prevlevel</code> to move between levels. Everything runs in your browser; reloading the page starts over.";
+const HELP_MANY = "Click the terminal and type. The other machines on the network run in the background; you only work on this one. Everything runs in your browser; reloading the page starts over.";
+
+// The exercise date is today (local time) unless the link sets ?date=YYYY-MM-DD.
+// Only labs with identity "polylab" use it; the server decides its own date.
+const now = new Date();
+let date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+const asked = new URLSearchParams(location.search).get("date");
+if (asked && /^\d{4}-\d{2}-\d{2}$/.test(asked) && !isNaN(Date.parse(asked))) date = asked;
+const code = parseInt(date.replaceAll("-", ""), 10).toString(16).toUpperCase();
+
+function identityCmdline(email) {
+  const hex = Array.from(new TextEncoder().encode(email), b => b.toString(16).padStart(2, "0")).join("");
+  return `${BASE_CMDLINE} polylab_email_hex=${hex} polylab_date=${date} polylab_code=${code}`;
+}
+
+async function getJSON(url) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`${url}: ${r.status}`);
+  return r.json();
+}
+
+(async () => {
+  const build = await getJSON("build.json").catch(() => ({}));
+  if (build.label) $("build").textContent = build.label;
+  if (build.title) { $("title").textContent = build.title; document.title = build.title; }
+  if (build.form_url) { $("form").href = build.form_url; $("form").hidden = false; }
+  let vms;
+  try {
+    vms = polylab.vms = await getJSON("images/vms.json");
+  } catch (e) {
+    // A page assembled before vms.json existed: one VM, the packaged image.
+    vms = polylab.vms = [{ name: "main", bzimage: "packaged.bzImage", initrd: "packaged.rootfs.cpio.gz",
+                           memory_mb: 256, visible: true }];
+  }
+  const many = vms.length > 1;
+  const askOnPage = build.server === true || build.identity === "polylab";
+  $("help").innerHTML = many ? HELP_MANY : askOnPage ? HELP_LEVELS : HELP_ASK;
+  if (!askOnPage) return start(vms, build, null);
+
+  if (many) $("start-text").textContent = "This lab runs several virtual machines in your browser. " +
+    "Your answers depend on the email you enter, so use your Penn State email.";
+  if (build.identity === "polylab" && !build.server) {
+    $("exercise").textContent = `Exercise date ${date} (code ${code}).`;
+    $("exercise").hidden = false;
+  }
+  if (many && (navigator.hardwareConcurrency || 4) < 4) $("cores").hidden = false;
   try { $("email").value = localStorage.getItem("polylab-email") || ""; } catch (e) {}
+  $("start").hidden = false;
+  setStatus("Waiting to start", "");
   $("start").addEventListener("submit", async ev => {
     ev.preventDefault();
+    const email = $("email").value.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { $("email-error").textContent = "Enter a valid email address."; return; }
+    $("email-error").textContent = "";
     $("go").disabled = true;
-    $("start-error").textContent = "";
     try {
-      const res = await fetch("api/session", { method: "POST", headers: { "Content-Type": "application/json" },
-                                               body: JSON.stringify({ email: $("email").value }) });
-      const info = await res.json();
-      if (!res.ok) throw new Error(info.error || "could not start the lab");
-      try { localStorage.setItem("polylab-email", info.email); } catch (e) {}
-      $("start").hidden = true;
-      $("screen_container").hidden = false;
-      $("help").hidden = false;
-      setStatus("Downloading the virtual machine…");
-      const [image, mine] = await Promise.all([download("images/packaged.rootfs.cpio.gz", true),
-                                               download(`api/vm/${info.vms[0]}.cpio.gz`, false)]);
-      const both = new Uint8Array(image.byteLength + mine.byteLength);
-      both.set(new Uint8Array(image), 0);
-      both.set(new Uint8Array(mine), image.byteLength);
-      boot({ buffer: both.buffer });
+      let session = null;
+      if (build.server === true) {
+        const res = await fetch("api/session", { method: "POST", headers: { "Content-Type": "application/json" },
+                                                 body: JSON.stringify({ email }) });
+        session = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(session.error || "could not start the lab");
+      }
+      try { localStorage.setItem("polylab-email", email); } catch (e) {}
+      await start(vms, build, email);
     } catch (e) {
-      $("start").hidden = false;
-      $("screen_container").hidden = true;
       $("go").disabled = false;
-      $("start-error").textContent = e.message;
-      setStatus("Waiting to start");
+      $("email-error").textContent = e.message;
     }
   });
-});
+})();
+
+// The initrd for a VM: its image, plus (for a server lab) this student's
+// archive from the server, joined end to end.
+function initrdParts(vm, build) {
+  const parts = ["images/" + vm.initrd];
+  if (build.server === true) parts.push(`api/vm/${vm.name}.cpio.gz`);
+  return parts;
+}
 
 async function download(url, progress) {
   const res = await fetch(url, { credentials: "same-origin" });
@@ -154,60 +219,127 @@ async function download(url, progress) {
   return new Blob(parts).arrayBuffer();
 }
 
-function boot(initrd) {
-  emulator = window.emulator = new V86({
+async function joined(urls) {
+  const parts = await Promise.all(urls.map((u, i) => download(u, i === 0)));
+  return new Blob(parts).arrayBuffer();
+}
+
+// ---- the hub ---------------------------------------------------------------
+const ports = [];   // {name, send(frame)}
+function deliver(from, frame) {
+  polylab.frames[from] = (polylab.frames[from] || 0) + 1;
+  for (const p of ports) if (p.name !== from) p.send(frame);
+}
+
+// ---- VM status chips (labs with several VMs) ---------------------------------
+function chip(name, show) {
+  const s = document.createElement("span");
+  s.innerHTML = '<i class="dot"></i>';
+  s.append(name);
+  if (show) $("vms").append(s);
+  return state => {
+    polylab.state[name] = state;
+    s.title = `${name}: ${state}`;
+    s.firstChild.className = "dot " + ({ running: "ok", error: "bad", waiting: "" }[state] ?? "busy");
+    if (state === "error") setStatus("A virtual machine failed to start (see the browser console)", "bad");
+  };
+}
+
+// ---- start -----------------------------------------------------------------
+async function start(vms, build, email) {
+  const cmdline = polylab.cmdline = build.identity === "polylab" && email ? identityCmdline(email) : BASE_CMDLINE;
+  const visible = vms.find(v => v.visible) || vms[0];
+  const hidden = vms.filter(v => v !== visible);
+  $("start").hidden = true;
+  $("screen_container").hidden = false;
+  $("help").hidden = false;
+  $("vms").hidden = hidden.length === 0;
+  const chips = Object.fromEntries(vms.map(v => [v.name, chip(v.name, hidden.length > 0)]));
+  for (const v of vms) chips[v.name]("waiting");
+  setStatus(hidden.length ? "Downloading the virtual machines…" : "Downloading the virtual machine…");
+
+  const parts = initrdParts(visible, build);
+  const initrd = parts.length === 1 ? { url: parts[0] } : { buffer: await joined(parts) };
+  chips[visible.name]("downloading");
+  const emulator = window.emulator = new V86({
     wasm_path: "v86/v86.wasm",
-    memory_size: 256 * 1024 * 1024,
+    memory_size: (visible.memory_mb || 256) * 1024 * 1024,
     vga_memory_size: 8 * 1024 * 1024,
     screen_container: $("screen_container"),
     bios: { url: "v86/seabios.bin" },
     vga_bios: { url: "v86/vgabios.bin" },
-    bzimage: { url: "images/packaged.bzImage" },
+    bzimage: { url: "images/" + visible.bzimage },
     initrd,
-    // console=ttyS0: kernel messages and the spare getty go to the (unseen)
-    // serial port, so the screen shows only the tty1 login, answered below.
-    // nomodeset: keeps bochs-drm from taking over the VGA card, which would
-    // switch the text console off and leave the screen blank.
-    cmdline: "console=ttyS0 nomodeset tsc=reliable mitigations=off random.trust_cpu=on",
+    cmdline,
     autostart: true,
   });
   emulator.add_listener("download-progress", e => {
     if (e.total) setStatus(`Downloading… ${Math.round(100 * e.loaded / e.total)}%`);
   });
-  emulator.add_listener("emulator-ready", () => setStatus("Booting Linux…"));
-  watchLogin();
-}
-
-// Log in as root when tty1 shows its login prompt; root's .profile then runs
-// the lab installer. Rows of the text screen are tracked from
-// screen-put-char events.
-function watchLogin() {
-const rows = [];
-let loggedIn = false;
-emulator.add_listener("screen-put-char", ([row, col, chr]) => {
-  if (loggedIn) return;
-  const line = rows[row] || (rows[row] = []);
-  line[col] = String.fromCharCode(chr);
-  const text = line.join("");
-  if (text.includes("login:")) {
-    loggedIn = true;
-    setTimeout(() => {
-      emulator.keyboard_send_text("root\n");
-      setStatus("Ready — click the terminal and type", true);
-      document.getElementById("screen_container").focus();
-    }, 300);
+  if (hidden.length) {
+    emulator.add_listener("net0-send", frame => deliver(visible.name, new Uint8Array(frame)));
+    ports.push({ name: visible.name, send: frame => emulator.bus.send("net0-receive", frame) });
   }
-});
+  // Hidden VMs start once the visible one is booting, one every few seconds,
+  // so their downloads and boots do not all compete at once.
+  emulator.add_listener("emulator-ready", () => {
+    chips[visible.name]("booting");
+    setStatus("Booting Linux…");
+    hidden.forEach((vm, i) => setTimeout(() => startHidden(vm, build, cmdline, chips[vm.name]), STAGGER_MS * (i + 1)));
+  });
+
+  // Log in as root when tty1 shows its login prompt; root's .profile then runs
+  // the lab. Rows of the text screen are tracked from screen-put-char events.
+  const rows = [];
+  let loggedIn = false;
+  emulator.add_listener("screen-put-char", ([row, col, chr]) => {
+    if (loggedIn) return;
+    const line = rows[row] || (rows[row] = []);
+    line[col] = String.fromCharCode(chr);
+    if (line.join("").includes("login:")) {
+      loggedIn = true;
+      chips[visible.name]("running");
+      setTimeout(() => {
+        emulator.keyboard_send_text("root\n");
+        setStatus("Ready — click the terminal and type", "ok");
+        $("ctrlc").disabled = false;
+        $("screen_container").focus();
+      }, 300);
+    }
+  });
+
+  $("ctrlc").onclick = () => {
+    emulator.keyboard_send_scancodes([0x1D, 0x2E, 0xAE, 0x9D]);   // Ctrl down, C, C up, Ctrl up (PS/2 set 1)
+    $("screen_container").focus();
+  };
 }
 
-document.getElementById("restart").onclick = () => location.reload();
-document.getElementById("ctrlc").onclick = () => {
-  if (!emulator) return;
-  // Ctrl down, C, C up, Ctrl up (PS/2 set 1 scancodes)
-  emulator.keyboard_send_scancodes([0x1D, 0x2E, 0xAE, 0x9D]);
-  document.getElementById("screen_container").focus();
-};
+function startHidden(vm, build, cmdline, setState) {
+  const worker = new Worker("vm-worker.js");
+  polylab.serial[vm.name] = [];
+  worker.onmessage = ({ data }) => {
+    if (data.type === "net") deliver(vm.name, data.frame);
+    else if (data.type === "state") setState(data.state);
+    else if (data.type === "serial") {
+      const log = polylab.serial[vm.name];
+      log.push(data.line);
+      if (log.length > 400) log.shift();
+    } else if (data.type === "error") {
+      polylab.errors.push(`${vm.name}: ${data.message}`);
+      console.error(`${vm.name}:`, data.message);
+      setState("error");
+    }
+  };
+  worker.onerror = e => {
+    polylab.errors.push(`${vm.name}: ${e.message}`);
+    setState("error");
+  };
+  // Frames to a worker are copied by postMessage (each VM gets its own copy).
+  ports.push({ name: vm.name, send: frame => worker.postMessage({ type: "net", frame }) });
+  worker.postMessage({ type: "start", vm, cmdline, initrd: initrdParts(vm, build) });
+}
 
+$("restart").onclick = () => location.reload();
 </script>
 </body>
 </html>
